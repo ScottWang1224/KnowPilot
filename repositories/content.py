@@ -8,12 +8,13 @@ DOCUMENT_SELECT = '''SELECT d.id,d.document_code,d.title,d.summary,d.content,d.c
 
 
 def document_scope(user):
-    published="d.status='published'"
-    if user['role']=='admin':
-        return published,()
-    if user['role'] not in {'employee','manager'}:
-        return '1=0',()
-    return published+" AND (d.visibility='company' OR (d.visibility='department' AND d.department_id=%s))",(user['department_id'],)
+    """The only document access rule: department alone decides; role never widens it.
+
+    Every document listing, detail and future RAG retrieval must go through here,
+    always with the database user from get_current_user, never a request parameter.
+    """
+    return ("d.status='published' AND (d.visibility='company' OR (d.visibility='department' AND d.department_id=%s))",
+            (user['department_id'],))
 
 
 def search_scope(user,q='',category=''):
@@ -64,5 +65,5 @@ def announcements(db,*,limit=12,offset=0):
 
 def announcement(db,item_id):
     scope,params=announcement_scope()
-    return db.query('''SELECT a.*,u.display_name AS author_name FROM announcements a
-                       JOIN users u ON u.id=a.created_by WHERE '''+scope+' AND a.id=%s',params+(item_id,),one=True)
+    return db.query('''SELECT a.*,u.name AS author_name FROM announcements a
+                       LEFT JOIN users u ON u.id=a.created_by WHERE '''+scope+' AND a.id=%s',params+(item_id,),one=True)

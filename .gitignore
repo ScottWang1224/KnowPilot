@@ -9,12 +9,14 @@ __pycache__/
 .pytest_cache/
 .test-artifacts/
 .worktrees/
+.data/
 *.log
-static/uploads/*
-!static/uploads/.gitkeep
 
 .aws/
 *.pem
 *.key
 id_rsa
-id_ed25519
+
+
+# Local AI agent collaboration records
+.agent-local/

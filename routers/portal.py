@@ -1,59 +1,123 @@
+"""Page shells plus the JSON APIs that fill them.
+
+Pages carry no data and do no login check; the browser loads data from /api/*,
+where get_current_user and document_scope protect every response.
+"""
 from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
-from core.security import require_user
-from core.views import pagination, render
+from core.dependencies import get_current_user
+from core.views import render, utc_iso
 from repositories import content
 
-router=APIRouter(dependencies=[Depends(require_user)])
+pages=APIRouter()
+api=APIRouter(prefix='/api',dependencies=[Depends(get_current_user)])
 PAGE_SIZE=12
+PAGE_LABELS={'dashboard':'工作總覽','announcement':'公司公告','document':'文件中心','assistant':'AI 助理','profile':'個人資料'}
 
 
-@router.get('/')
-def dashboard(request:Request):
-    db,user=request.app.state.db,request.state.user
-    return render(request,'index.html',{'active':'dashboard','page_label':'工作總覽',
-        'announcement_count':content.announcement_count(db),'document_count':content.document_count(db,user),
-        'announcements':content.announcements(db,limit=3),'documents':content.documents(db,user,limit=4)})
+def page(request,name,active,**context):
+    return render(request,name,{'active':active,'page_label':PAGE_LABELS[active],**context})
 
 
-@router.get('/announcements')
+@pages.get('/')
+def dashboard_page(request:Request):
+    return page(request,'index.html','dashboard')
+
+
+@pages.get('/announcements')
+def announcements_page(request:Request):
+    return page(request,'announcements.html','announcement')
+
+
+@pages.get('/announcements/{item_id}')
+def announcement_page(request:Request,item_id:Annotated[int,Path(ge=1)]):
+    return page(request,'announcement_detail.html','announcement',item_id=item_id)
+
+
+@pages.get('/documents')
+def documents_page(request:Request):
+    return page(request,'documents.html','document')
+
+
+@pages.get('/documents/{doc_id}')
+def document_page(request:Request,doc_id:Annotated[int,Path(ge=1)]):
+    return page(request,'document_detail.html','document',doc_id=doc_id)
+
+
+@pages.get('/assistant')
+def assistant_page(request:Request):
+    return page(request,'assistant.html','assistant')
+
+
+@pages.get('/profile')
+def profile_page(request:Request):
+    return page(request,'profile.html','profile')
+
+
+@pages.get('/login')
+def login_page(request:Request):
+    return render(request,'login.html')
+
+
+@pages.get('/register')
+def register_page(request:Request):
+    return render(request,'register.html')
+
+
+def paged(items,page,total):
+    return {'data':items,'page':page,'total':total,'total_pages':max(1,(total+PAGE_SIZE-1)//PAGE_SIZE)}
+
+
+def clamp(page,total):
+    return min(page,max(1,(total+PAGE_SIZE-1)//PAGE_SIZE))
+
+
+def announcement_data(item):
+    data={k:item[k] for k in ('id','title','content','category')}
+    data.update(is_pinned=bool(item['is_pinned']),published_at=utc_iso(item['published_at']))
+    if 'author_name' in item: data['author_name']=item['author_name']
+    return data
+
+
+def document_data(doc,with_content=False):
+    keys=('id','document_code','title','summary','category','visibility','version','department_name')
+    data={k:doc[k] for k in keys}
+    data['updated_at']=utc_iso(doc['updated_at'])
+    if with_content: data['content']=doc['content']
+    return data
+
+
+@api.get('/announcements')
 def announcements(request:Request,page:Annotated[int,Query(ge=1,le=100000)]=1):
     db=request.app.state.db
     total=content.announcement_count(db)
-    page=min(page,max(1,(total+PAGE_SIZE-1)//PAGE_SIZE))
-    return render(request,'announcements.html',{'active':'announcement','page_label':'公司公告',
-        'announcements':content.announcements(db,limit=PAGE_SIZE,offset=(page-1)*PAGE_SIZE),
-        **pagination('/announcements',page,total,PAGE_SIZE)})
+    page=clamp(page,total)
+    items=content.announcements(db,limit=PAGE_SIZE,offset=(page-1)*PAGE_SIZE)
+    return paged([announcement_data(a) for a in items],page,total)
 
 
-@router.get('/announcements/{item_id}')
+@api.get('/announcements/{item_id}')
 def announcement(request:Request,item_id:Annotated[int,Path(ge=1)]):
     item=content.announcement(request.app.state.db,item_id)
-    if item is None: raise HTTPException(404)
-    return render(request,'announcement_detail.html',{'item':item,'active':'announcement','page_label':'公司公告'})
+    if item is None: raise HTTPException(404,'找不到這則公告')
+    return {'data':announcement_data(item)}
 
 
-@router.get('/documents')
-def documents(request:Request,q:Annotated[str,Query(max_length=100)]='',
+@api.get('/documents')
+def documents(request:Request,user=Depends(get_current_user),q:Annotated[str,Query(max_length=100)]='',
               category:Annotated[str,Query(max_length=32)]='',page:Annotated[int,Query(ge=1,le=100000)]=1):
-    db,user=request.app.state.db,request.state.user
+    db=request.app.state.db
     q=q.strip()
     total=content.document_count(db,user,q,category)
-    page=min(page,max(1,(total+PAGE_SIZE-1)//PAGE_SIZE))
-    return render(request,'documents.html',{'active':'document','page_label':'文件中心','q':q,'category':category,
-        'categories':content.document_categories(db,user),
-        'documents':content.documents(db,user,q=q,category=category,limit=PAGE_SIZE,offset=(page-1)*PAGE_SIZE),
-        **pagination('/documents',page,total,PAGE_SIZE,q=q,category=category)})
+    page=clamp(page,total)
+    items=content.documents(db,user,q=q,category=category,limit=PAGE_SIZE,offset=(page-1)*PAGE_SIZE)
+    return {**paged([document_data(d) for d in items],page,total),'categories':content.document_categories(db,user)}
 
 
-@router.get('/documents/{doc_id}')
-def document(request:Request,doc_id:Annotated[int,Path(ge=1)]):
-    doc=content.document(request.app.state.db,request.state.user,doc_id)
-    if doc is None: raise HTTPException(404)
-    return render(request,'document_detail.html',{'doc':doc,'active':'document','page_label':'文件中心'})
-
-
-@router.get('/assistant')
-def assistant(request:Request):
-    return render(request,'assistant.html',{'active':'assistant','page_label':'AI 助理'})
+@api.get('/documents/{doc_id}')
+def document(request:Request,doc_id:Annotated[int,Path(ge=1)],user=Depends(get_current_user)):
+    doc=content.document(request.app.state.db,user,doc_id)
+    if doc is None: raise HTTPException(404,'找不到這份文件')
+    return {'data':document_data(doc,with_content=True)}

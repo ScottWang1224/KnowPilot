@@ -1,6 +1,7 @@
-"""Explicit, insert-only fictional demo seed. Existing accounts/content stay unchanged."""
-import getpass
-import os
+"""Run explicitly: python -m scripts.seed. Insert-only fictional departments and content.
+
+Existing content stays unchanged. Accounts come from registration or scripts.seed_admin.
+"""
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -8,8 +9,6 @@ from core.config import ROOT
 from core.database import Database
 
 DEPARTMENTS = [('MFG','製造部'),('PE','製程工程部'),('QA','品質保證部'),('RD','研發部'),('ADM','行政管理部')]
-EMPLOYEES = [('MFG001','林怡安','MFG','employee'),('RD001','陳柏宇','RD','employee'),
-             ('QA001','許雅婷','QA','employee'),('MGR001','張志宏','MFG','manager'),('ADMIN001','王思涵','ADM','admin')]
 DOCUMENTS = [
 ('ADM-RULE-001','員工工作與資訊安全規範','工作紀律、公司資訊與帳號使用的共同規範。','規章',None,'company','1.0',
  '''一、適用範圍
@@ -106,9 +105,9 @@ DOCUMENTS = [
 
 三、留存
 依公司核准規範保存紀錄，不任意刪除或覆寫原始資料。'''),
-('RD-SEC-001','研發配方資訊管理規範','限制文件：配方資訊的授權、交接與保存原則。','規章','RD','restricted','1.0',
+('RD-SEC-001','研發配方資訊管理規範','研發部配方資訊的授權、交接與保存原則。','規章','RD','department','1.0',
  '''一、文件等級
-本展示文件標示為限制存取，僅管理員角色可以查閱。
+本文件僅開放研發部人員查閱。
 
 二、授權原則
 實際配方與專案機密應依核准授權清單管理，保留必要的存取紀錄。
@@ -122,10 +121,7 @@ DOCUMENTS = [
 本文件只有虛構管理規範，不包含任何真實配方。''')]
 
 
-def seed(db, password):
-    from core.security import hash_password
-    if len(password) < 12 or len(password) > 256:
-        raise ValueError('Demo password must contain 12–256 characters')
+def seed(db):
     with db.transaction() as cursor:
         for code,name in DEPARTMENTS:
             cursor.execute('SELECT id FROM departments WHERE code=%s',(code,))
@@ -133,17 +129,10 @@ def seed(db, password):
                 cursor.execute('INSERT INTO departments(code,name) VALUES(%s,%s)',(code,name))
         cursor.execute('SELECT id,code FROM departments')
         departments={r['code']:r['id'] for r in cursor.fetchall()}
-        for employee,name,department,role in EMPLOYEES:
-            cursor.execute('SELECT id FROM users WHERE employee_no=%s',(employee,))
-            if not cursor.fetchone():
-                cursor.execute('''INSERT INTO users(employee_no,display_name,password_hash,department_id,role)
-                                  VALUES(%s,%s,%s,%s,%s)''',(employee,name,hash_password(password),departments[department],role))
-        cursor.execute('SELECT id FROM users WHERE employee_no=%s',('ADMIN001',))
-        author=cursor.fetchone()['id']
         now=datetime.now(timezone.utc).replace(tzinfo=None,microsecond=0)
         announcements=[
-            ('welcome','SmartFab 內部工作平台正式開放展示','公司通知',1,
-             '歡迎使用 SmartFab 企業內部工作平台。\n\n登入後可查看公司公告與授權文件。請確認自己的部門與角色資訊，並閱讀資訊安全規範。\n\n此平台為期初展示，所有公司、員工與文件均為虛構資料。'),
+            ('welcome','KnowPilot 內部工作平台正式開放展示','公司通知',1,
+             '歡迎使用 KnowPilot 企業內部工作平台。\n\n登入後可查看公司公告與授權文件。請確認自己的部門與角色資訊，並閱讀資訊安全規範。\n\n此平台為期初展示，所有公司、員工與文件均為虛構資料。'),
             ('training','新進員工教育訓練教材已更新','教育訓練',0,
              '新進員工教育訓練指南已更新至 1.1 版。\n\n請至文件中心查看最新教材，並與部門主管確認訓練安排。'),
             ('quality','品質異常通報與追溯規範提醒','品質通知',0,
@@ -153,22 +142,20 @@ def seed(db, password):
         for days,(key,title,category,pinned,content) in enumerate(announcements):
             cursor.execute('SELECT id FROM announcements WHERE seed_key=%s',(key,))
             if not cursor.fetchone():
-                cursor.execute('''INSERT INTO announcements(seed_key,title,content,category,is_pinned,status,published_at,created_by)
-                                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s)''',
-                               (key,title,content,category,pinned,'published',now-timedelta(days=days),author))
+                cursor.execute('''INSERT INTO announcements(seed_key,title,content,category,is_pinned,status,published_at)
+                                  VALUES(%s,%s,%s,%s,%s,%s,%s)''',
+                               (key,title,content,category,pinned,'published',now-timedelta(days=days)))
         for code,title,summary,category,department,visibility,version,content in DOCUMENTS:
             if visibility=='department' and not department:
                 raise ValueError('Department document requires department_id')
             cursor.execute('SELECT id FROM documents WHERE document_code=%s',(code,))
             if not cursor.fetchone():
-                cursor.execute('''INSERT INTO documents(document_code,title,summary,content,category,department_id,visibility,version,status,created_by)
-                                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
-                               (code,title,summary,content,category,departments.get(department),visibility,version,'published',author))
+                cursor.execute('''INSERT INTO documents(document_code,title,summary,content,category,department_id,visibility,version,status)
+                                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                               (code,title,summary,content,category,departments.get(department),visibility,version,'published'))
 
 
 if __name__=='__main__':
     load_dotenv(ROOT/'.env')
-    password=os.getenv('SMARTFAB_DEMO_PASSWORD') or getpass.getpass('Demo account password (12+ characters): ')
-    seed(Database(),password)
-    print('Demo seed complete. Existing records/passwords were preserved.')
-    print('Employees: '+', '.join(employee[0] for employee in EMPLOYEES))
+    seed(Database.from_env())
+    print('Seed complete. Existing records were preserved.')

@@ -1,276 +1,302 @@
-"""Contract tests: real app, SQL repositories and hashing; isolated SQLite boundary.
+"""Contract tests: real app, SQL repositories, hashing, JWT and the SQLite migration.
 
+Numbers in test docstrings refer to the acceptance cases in .agent-local/auth-reference.md §7.
 SQLite does not replace the opt-in MySQL migration/integration checks.
 """
-import re
-import sqlite3
-
 import pytest
 from fastapi.testclient import TestClient
 
-
-class Cursor:
-    def __init__(self, cursor):
-        self.cursor = cursor
-
-    def execute(self, sql, params=()):
-        sql = sql.replace('%s', '?').replace(' FOR UPDATE', '')
-        sql = sql.replace('INSERT IGNORE', 'INSERT OR IGNORE')
-        self.cursor.execute(sql, params)
-        return self
-
-    def fetchone(self):
-        row = self.cursor.fetchone()
-        return dict(row) if row else None
-
-    def fetchall(self):
-        return [dict(row) for row in self.cursor.fetchall()]
-
-    @property
-    def rowcount(self):
-        return self.cursor.rowcount
-
-    @property
-    def lastrowid(self):
-        return self.cursor.lastrowid
-
-    def close(self):
-        self.cursor.close()
+PASSWORD = 'test-only-password'
 
 
 @pytest.fixture
 def portal(tmp_path, monkeypatch):
-    # Prevent the production app export from reading local .env secrets.
-    monkeypatch.setenv('SESSION_SECRET', 'isolated-test-secret-' + 'x' * 40)
     monkeypatch.setenv('APP_ENV', 'test')
     from app import create_app
     from core.config import Settings
     from core.database import Database
     from core.security import hash_password
+    from scripts.migrate import migrate
 
-    path = tmp_path / 'portal.db'
-    conn = sqlite3.connect(path)
-    conn.executescript('''
-    CREATE TABLE departments(id INTEGER PRIMARY KEY, code TEXT UNIQUE, name TEXT, is_active INTEGER DEFAULT 1);
-    CREATE TABLE users(id INTEGER PRIMARY KEY,employee_no TEXT UNIQUE,display_name TEXT,password_hash TEXT,
-      department_id INTEGER,role TEXT,is_active INTEGER,session_version INTEGER DEFAULT 1);
-    CREATE TABLE announcements(id INTEGER PRIMARY KEY,title TEXT,content TEXT,category TEXT,is_pinned INTEGER,
-      status TEXT,published_at TEXT,created_by INTEGER,created_at TEXT,updated_at TEXT);
-    CREATE TABLE documents(id INTEGER PRIMARY KEY,document_code TEXT UNIQUE,title TEXT,summary TEXT,content TEXT,
-      category TEXT,department_id INTEGER,visibility TEXT,version TEXT,status TEXT,created_by INTEGER,created_at TEXT,updated_at TEXT);
-    CREATE TABLE login_attempts(key_hash TEXT PRIMARY KEY,attempts INTEGER,window_started_at TEXT);
-    ''')
-    conn.executemany('INSERT INTO departments VALUES(?,?,?,1)', [(1,'MFG','製造部'),(2,'RD','研發部')])
-    pw = hash_password('test-only-password')
-    conn.executemany('INSERT INTO users VALUES(?,?,?,?,?,?,?,1)', [
-        (1,'M001','林員工',pw,1,'employee',1), (2,'R001','研發員工',pw,2,'employee',1),
-        (3,'A001','管理員',pw,1,'admin',1), (4,'M002','製造主管',pw,1,'manager',1),
-        (5,'OFF','停用員工',pw,1,'employee',0)])
+    db = Database.sqlite(tmp_path / 'portal.db')
+    migrate(db, 'sqlite')
+    pw = hash_password(PASSWORD)
     now = '2026-01-01 00:00:00'
-    conn.executemany('INSERT INTO documents VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', [
-        (1,'GEN-001','公司規章','摘要','全公司內容','規章',None,'company','1.0','published',3,now,now),
-        (2,'MFG-001','塗布 SOP','摘要','製造機密內容','SOP',1,'department','1.2','published',3,now,now),
-        (3,'RD-001','研發 SOP','摘要','研發機密內容','SOP',2,'department','2.0','published',3,now,now),
-        (4,'SEC-001','配方管制','摘要','限制內容','規章',2,'restricted','1.0','published',3,now,now),
-        (5,'DRAFT-001','草稿文件','摘要','草稿內容','SOP',None,'company','0.1','draft',3,now,now),
-        (6,'XSS-001','安全文字','摘要','<script>alert(1)</script>','訓練',None,'company','1.0','published',3,now,now)])
-    conn.executemany('INSERT INTO announcements VALUES(?,?,?,?,?,?,?,?,?,?)', [
-        (1,'教育訓練公告','請參加訓練','教育訓練',1,'published',now,3,now,now),
-        (2,'未發布公告','草稿公告內容','行政',0,'draft',now,3,now,now),
-        (3,'未來公告','未來公告內容','行政',0,'published','2099-01-01 00:00:00',3,now,now)])
-    conn.commit()
-    conn.close()
+    with db.transaction() as cursor:
+        for row in [(1,'MFG','製造部'),(2,'RD','研發部')]:
+            cursor.execute('INSERT INTO departments(id,code,name) VALUES(%s,%s,%s)', row)
+        for row in [(1,'m001@example.com','林員工',pw,1,'user',1), (2,'r001@example.com','研發員工',pw,2,'user',1),
+                    (3,'a001@example.com','管理員',pw,1,'admin',1), (4,'off@example.com','停用員工',pw,1,'user',0)]:
+            cursor.execute('INSERT INTO users(id,email,name,password_hash,department_id,role,is_active) '
+                           'VALUES(%s,%s,%s,%s,%s,%s,%s)', row)
+        for row in [
+            (1,'GEN-001','公司規章','摘要','全公司內容','規章',None,'company','1.0','published'),
+            (2,'MFG-001','塗布 SOP','摘要','製造機密內容','SOP',1,'department','1.2','published'),
+            (3,'RD-001','研發 SOP','摘要','研發機密內容','SOP',2,'department','2.0','published'),
+            (4,'SEC-001','配方管制','摘要','研發配方內容','規章',2,'department','1.0','published'),
+            (5,'DRAFT-001','草稿文件','摘要','草稿內容','SOP',None,'company','0.1','draft'),
+            (6,'XSS-001','安全文字','摘要','<script>alert(1)</script>','訓練',None,'company','1.0','published')]:
+            cursor.execute('INSERT INTO documents(id,document_code,title,summary,content,category,department_id,'
+                           'visibility,version,status,created_at,updated_at) '
+                           'VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', row + (now, now))
+        for row in [(1,'教育訓練公告','請參加訓練','教育訓練',1,'published',now,3),
+                    (2,'未發布公告','草稿公告內容','行政',0,'draft',now,3),
+                    (3,'未來公告','未來公告內容','行政',0,'published','2099-01-01 00:00:00',3)]:
+            cursor.execute('INSERT INTO announcements(id,title,content,category,is_pinned,status,published_at,created_by) '
+                           'VALUES(%s,%s,%s,%s,%s,%s,%s,%s)', row)
 
-    class Connection:
-        def __init__(self):
-            self.conn = sqlite3.connect(path, timeout=10)
-            self.conn.row_factory = sqlite3.Row
-        def cursor(self, **kwargs):
-            return Cursor(self.conn.cursor())
-        def commit(self): self.conn.commit()
-        def rollback(self): self.conn.rollback()
-        def close(self): self.conn.close()
-
-    db = Database(connection_factory=Connection)
     settings = Settings.from_env()
-    app = create_app(settings, db)
-    with TestClient(app, base_url='http://testserver') as client:
+    with TestClient(create_app(settings, db), base_url='http://testserver') as client:
         yield client, db, settings
 
 
-def csrf(response):
-    match = re.search(r'name="csrf_token" value="([^"]+)"', response.text)
-    assert match, response.text[:400]
-    return match.group(1)
+def login(client, email='m001@example.com', password=PASSWORD):
+    return client.post('/api/auth/login', json={'email': email, 'password': password})
 
 
-def login(client, employee='M001', password='test-only-password', next_path='/'):
-    token = csrf(client.get('/login'))
-    return client.post('/login', data={'employee_no':employee,'password':password,
-        'csrf_token':token,'next':next_path}, follow_redirects=False)
+def bearer(client, email='m001@example.com'):
+    response = login(client, email)
+    assert response.status_code == 200, response.text
+    return {'Authorization': 'Bearer ' + response.json()['token']}
 
 
-def test_anonymous_routes_redirect_and_legacy_is_disabled(portal):
+def visible_documents(client, headers, **params):
+    return {d['id'] for d in client.get('/api/documents', headers=headers, params=params).json()['data']}
+
+
+def assert_error(response, status):
+    assert response.status_code == status, response.text
+    body = response.json()
+    assert body['error'] is True and body['message']
+    return body['message']
+
+
+def test_login_and_uniform_failure_messages(portal):
+    """1. Correct credentials work; wrong password, unknown and inactive accounts share one 401 message."""
     client, _, _ = portal
-    for path in ['/', '/documents', '/documents/2', '/announcements', '/assistant']:
-        assert client.get(path, follow_redirects=False).status_code == 303
-    assert client.get('/api/posts').status_code == 404
+    assert login(client).status_code == 200
+    assert login(client, email='  M001@Example.com ').status_code == 200
+    messages = {assert_error(login(client, password='wrong-password'), 401),
+                assert_error(login(client, email='nobody@example.com'), 401),
+                assert_error(login(client, email='off@example.com'), 401),
+                assert_error(login(client, email='not-an-email'), 401)}
+    assert messages == {'電子信箱或密碼錯誤'}
 
 
-@pytest.mark.parametrize('employee,allowed,denied', [
-    ('M001',[1,2,6],[3,4,5]), ('R001',[1,3,6],[2,4,5]),
-    ('M002',[1,2,6],[3,4,5]), ('A001',[1,2,3,4,6],[5])])
-def test_document_list_detail_and_dashboard_share_permissions(portal,employee,allowed,denied):
-    client, _, _ = portal
-    assert login(client,employee).status_code == 303
-    listing = client.get('/documents').text
-    for doc in allowed:
-        assert f'href="/documents/{doc}"' in listing
-        assert client.get(f'/documents/{doc}').status_code == 200
-    for doc in denied:
-        assert f'href="/documents/{doc}"' not in listing
-        assert client.get(f'/documents/{doc}').status_code == 404
-    dashboard = client.get('/')
-    assert dashboard.status_code == 200
-    assert f'data-document-count="{len(allowed)}"' in dashboard.text
-
-
-def test_wrong_password_inactive_user_and_missing_csrf_fail(portal):
-    client, _, _ = portal
-    assert login(client,password='wrong').status_code == 400
-    assert login(client,employee='OFF').status_code == 400
-    assert client.post('/login',data={'employee_no':'M001','password':'test-only-password'}).status_code == 403
-
-
-def test_logout_revokes_copied_cookie_and_requires_post_csrf(portal):
-    client, _, settings = portal
-    login(client)
-    copied = client.cookies.get(settings.session_cookie)
-    assert client.get('/logout').status_code == 405
-    assert client.post('/logout', data={}).status_code == 403
-    assert client.post('/logout',data={'csrf_token':csrf(client.get('/'))},follow_redirects=False).status_code == 303
-    client.cookies.set(settings.session_cookie,copied)
-    assert client.get('/documents',follow_redirects=False).status_code == 303
-
-
-def test_user_changes_are_read_from_database(portal):
+def test_register_hashes_password_and_never_grants_admin(portal):
+    """2, 6. Passwords are hashed; a role in the request is ignored; bad input is rejected without writes."""
     client, db, _ = portal
-    login(client,'A001')
-    assert client.get('/documents/4').status_code == 200
-    db.execute('UPDATE users SET role=%s,department_id=%s WHERE id=%s',('employee',1,3))
-    assert client.get('/documents/4').status_code == 404
-    db.execute('UPDATE users SET is_active=0 WHERE id=3')
-    assert client.get('/',follow_redirects=False).status_code == 303
+    body = {'name': '新同事', 'email': 'New@Example.com', 'password': 'a-strong-password', 'department_id': 2, 'role': 'admin'}
+    assert client.post('/api/auth/register', json=body).status_code == 201
+    row = db.query('SELECT * FROM users WHERE email=%s', ('new@example.com',), one=True)
+    assert row['role'] == 'user' and row['department_id'] == 2
+    assert row['password_hash'].startswith('$argon2id$') and 'a-strong-password' not in row['password_hash']
+    assert_error(client.post('/api/auth/register', json={**body, 'email': 'NEW@example.com'}), 409)
+    count = db.query('SELECT COUNT(*) AS n FROM users', one=True)['n']
+    assert_error(client.post('/api/auth/register', json={**body, 'email': 'x@example.com', 'department_id': 99}), 400)
+    assert '密碼' in assert_error(client.post('/api/auth/register', json={**body, 'email': 'y@example.com', 'password': 'short'}), 400)
+    assert_error(client.post('/api/auth/register', json={**body, 'email': 'not-an-email'}), 400)
+    assert_error(client.post('/api/auth/register', json={**body, 'email': 'z@example.com', 'name': '   '}), 400)
+    assert db.query('SELECT COUNT(*) AS n FROM users', one=True)['n'] == count
+    assert login(client, 'new@example.com', 'a-strong-password').status_code == 200
 
 
-def test_search_and_published_content_do_not_leak(portal):
+def test_me_rejects_missing_invalid_expired_and_tampered_tokens(portal):
+    """3. Without a valid token /api/auth/me is 401."""
+    import jwt
+    from datetime import datetime, timedelta, timezone
+    client, _, settings = portal
+    headers = bearer(client)
+    me = client.get('/api/auth/me', headers=headers).json()['data']
+    assert me == {'id': 1, 'name': '林員工', 'email': 'm001@example.com', 'role': 'user', 'department': {'id': 1, 'name': '製造部'}}
+    good = headers['Authorization'].split()[1]
+    expired = jwt.encode({'sub': '1', 'exp': datetime.now(timezone.utc) - timedelta(seconds=1)}, settings.jwt_secret, algorithm='HS256')
+    forged = jwt.encode({'sub': '3', 'exp': datetime.now(timezone.utc) + timedelta(hours=1)}, 'another-secret-' + 'x' * 40, algorithm='HS256')
+    no_expiry = jwt.encode({'sub': '1'}, settings.jwt_secret, algorithm='HS256')
+    missing_user = jwt.encode({'sub': '999', 'exp': datetime.now(timezone.utc) + timedelta(hours=1)}, settings.jwt_secret, algorithm='HS256')
+    assert_error(client.get('/api/auth/me'), 401)
+    for value in ['garbage', good[:-4] + 'AAAA', expired, forged, no_expiry, missing_user]:
+        assert_error(client.get('/api/auth/me', headers={'Authorization': 'Bearer ' + value}), 401)
+
+
+def test_deactivated_user_or_department_invalidates_existing_token(portal):
+    """4. is_active is read on every request."""
+    client, db, _ = portal
+    headers = bearer(client)
+    assert client.get('/api/documents', headers=headers).status_code == 200
+    db.execute('UPDATE departments SET is_active=0 WHERE id=1')
+    assert_error(client.get('/api/documents', headers=headers), 401)
+    db.execute('UPDATE departments SET is_active=1 WHERE id=1')
+    db.execute('UPDATE users SET is_active=0 WHERE id=1')
+    assert_error(client.get('/api/auth/me', headers=headers), 401)
+
+
+def test_missing_jwt_secret_refuses_to_start(monkeypatch):
+    """5."""
+    from app import create_app
+    from core.config import Settings
+    monkeypatch.setenv('APP_ENV', 'test')
+    for value in (None, 'too-short'):
+        if value is None: monkeypatch.delenv('JWT_SECRET', raising=False)
+        else: monkeypatch.setenv('JWT_SECRET', value)
+        with pytest.raises(ValueError, match='JWT_SECRET'): Settings.from_env()
+        with pytest.raises(ValueError, match='JWT_SECRET'): create_app()
+
+
+@pytest.mark.parametrize('email,allowed,denied', [
+    ('m001@example.com', {1,2,6}, {3,4,5}), ('r001@example.com', {1,3,4,6}, {2,5}),
+    ('a001@example.com', {1,2,6}, {3,4,5})])
+def test_documents_follow_department_only(portal, email, allowed, denied):
+    """15. Admin sees exactly what a same-department user sees."""
     client, _, _ = portal
-    login(client)
-    response = client.get('/documents',params={'q':'研發','category':'SOP'})
+    headers = bearer(client, email)
+    result = client.get('/api/documents', headers=headers).json()
+    assert {d['id'] for d in result['data']} == allowed and result['total'] == len(allowed)
+    for doc in allowed:
+        assert client.get(f'/api/documents/{doc}', headers=headers).status_code == 200
+    for doc in denied:
+        assert_error(client.get(f'/api/documents/{doc}', headers=headers), 404)
+
+
+def test_department_switch_applies_to_same_token(portal):
+    """7. A new department applies on the next request without a new token."""
+    client, db, _ = portal
+    headers = bearer(client)
+    assert visible_documents(client, headers) == {1, 2, 6}
+    response = client.patch('/api/auth/me/department', headers=headers, json={'department_id': 2, 'confirm_clear_history': True})
     assert response.status_code == 200
-    assert '研發機密內容' not in response.text
-    assert 'href="/documents/3"' not in response.text
-    assert client.get('/announcements/1').status_code == 200
-    assert client.get('/announcements/2').status_code == 404
-    assert client.get('/announcements/3').status_code == 404
-    assert '草稿公告內容' not in client.get('/announcements').text
-    assert '&lt;script&gt;' in client.get('/documents/6').text
+    assert response.json()['data']['department'] == {'id': 2, 'name': '研發部'}
+    assert response.json()['hidden_conversations'] == 0
+    assert visible_documents(client, headers) == {1, 3, 4, 6}
+    assert db.query('SELECT department_id FROM users WHERE id=1', one=True)['department_id'] == 2
 
 
-@pytest.mark.parametrize('path',['https://evil.example','//evil.example','/\\evil.example','/login','/logout'])
-def test_login_redirect_stays_inside_portal(portal,path):
+def test_request_department_or_role_parameters_are_ignored(portal):
+    """8."""
     client, _, _ = portal
-    response = login(client,next_path=path)
-    assert response.headers['location'] == '/'
+    headers = bearer(client)
+    assert visible_documents(client, headers, department_id=2, role='admin') == {1, 2, 6}
+    assert_error(client.get('/api/documents/3', headers=headers, params={'department_id': 2}), 404)
+    response = client.patch('/api/auth/me/department', headers=headers,
+                            json={'department_id': 1, 'confirm_clear_history': True, 'role': 'admin', 'user_id': 2})
+    assert response.json()['data']['role'] == 'user' and response.json()['data']['id'] == 1
+
+
+def test_department_switch_requires_confirmation_and_valid_department(portal):
+    """6, 9. Nothing changes without confirm_clear_history or with an unknown department."""
+    client, db, _ = portal
+    headers = bearer(client)
+    for body in [{'department_id': 2}, {'department_id': 2, 'confirm_clear_history': False},
+                 {'department_id': 99, 'confirm_clear_history': True}]:
+        assert_error(client.patch('/api/auth/me/department', headers=headers, json=body), 400)
+    assert db.query('SELECT department_id FROM users WHERE id=1', one=True)['department_id'] == 1
+    assert_error(client.patch('/api/auth/me/department', json={'department_id': 2, 'confirm_clear_history': True}), 401)
+
+
+def test_admin_api_requires_admin_role(portal):
+    """13, 14 (users list; conversation and feedback APIs wait for the chat tables)."""
+    client, _, _ = portal
+    assert_error(client.get('/api/admin/users'), 401)
+    assert_error(client.get('/api/admin/users', headers=bearer(client)), 403)
+    users = client.get('/api/admin/users', headers=bearer(client, 'a001@example.com')).json()['data']
+    assert {u['email'] for u in users} >= {'m001@example.com', 'off@example.com'}
+    assert all('password_hash' not in u for u in users)
+
+
+def test_departments_list_is_public_and_active_only(portal):
+    client, db, _ = portal
+    db.execute('UPDATE departments SET is_active=0 WHERE id=2')
+    assert client.get('/api/departments').json()['data'] == [{'id': 1, 'code': 'MFG', 'name': '製造部'}]
+
+
+def test_content_apis_require_login_and_hide_unpublished(portal):
+    client, _, _ = portal
+    for path in ['/api/documents', '/api/documents/1', '/api/announcements', '/api/announcements/1']:
+        assert_error(client.get(path), 401)
+    headers = bearer(client)
+    result = client.get('/api/documents', headers=headers, params={'q': '研發', 'category': 'SOP'}).json()
+    assert result['data'] == [] and result['categories'] == ['SOP', '規章', '訓練']
+    assert [a['id'] for a in client.get('/api/announcements', headers=headers).json()['data']] == [1]
+    item = client.get('/api/announcements/1', headers=headers).json()['data']
+    assert item['author_name'] == '管理員' and item['published_at'] == '2026-01-01T00:00:00+00:00'
+    assert_error(client.get('/api/announcements/2', headers=headers), 404)
+    assert_error(client.get('/api/announcements/3', headers=headers), 404)
+    assert visible_documents(client, headers, q='%') == set()
+    assert visible_documents(client, headers, q="' OR 1=1 --") == set()
+
+
+def test_pages_are_data_free_shells(portal):
+    client, _, _ = portal
+    for path in ['/', '/documents', '/documents/3', '/announcements', '/announcements/2', '/assistant', '/profile', '/login', '/register']:
+        page = client.get(path)
+        assert page.status_code == 200
+        assert '研發機密內容' not in page.text and '草稿公告內容' not in page.text
+    assert client.get('/documents/-1').status_code == 422
+    assert client.get('/missing').status_code == 404
+
+
+def test_api_validation_and_unknown_routes_use_json_errors(portal):
+    client, _, _ = portal
+    headers = bearer(client)
+    assert '頁碼' in assert_error(client.get('/api/documents', headers=headers, params={'page': 0}), 400)
+    assert_error(client.get('/api/documents/-1', headers=headers), 400)
+    assert_error(client.get('/api/documents', headers=headers, params={'q': 'x' * 101}), 400)
+    assert_error(client.post('/api/auth/login', content='not json', headers={'Content-Type': 'application/json'}), 400)
+    assert assert_error(client.get('/api/nothing-here'), 404) == '找不到資源'
 
 
 def test_throttle_persists_between_app_instances(portal):
     client, db, settings = portal
     for _ in range(settings.login_limit):
-        assert login(client,password='wrong').status_code == 400
-    assert login(client,password='wrong').status_code == 429
+        assert_error(login(client, password='wrong-password'), 401)
+    response = login(client)
+    assert_error(response, 429)
+    assert response.headers['retry-after'] == str(settings.login_window)
     from app import create_app
-    with TestClient(create_app(settings,db)) as other:
-        assert login(other,password='wrong').status_code == 429
+    with TestClient(create_app(settings, db)) as other:
+        assert_error(login(other), 429)
+        # Registration has its own budget.
+        body = {'name': 'n', 'email': 'q@example.com', 'password': 'long-enough', 'department_id': 1}
+        assert other.post('/api/auth/register', json=body).status_code == 201
 
 
-def test_passwords_and_production_configuration(monkeypatch):
-    from core.config import Settings
-    from core.security import hash_password, verify_password
-    hashed = hash_password('unique password')
-    assert hashed.startswith('$argon2id$')
-    assert hashed != hash_password('unique password')
-    assert verify_password('unique password',hashed)
-    assert not verify_password('bad',hashed)
-    assert not verify_password('bad','invalid hash')
-    monkeypatch.setenv('APP_ENV','production')
-    monkeypatch.setenv('SESSION_SECRET','x'*48)
-    monkeypatch.setenv('SESSION_HTTPS_ONLY','false')
-    with pytest.raises(ValueError): Settings.from_env()
-    monkeypatch.setenv('SESSION_HTTPS_ONLY','true')
-    monkeypatch.setenv('ALLOWED_HOSTS','portal.example.com')
-    assert Settings.from_env().https_only
-    monkeypatch.delenv('SESSION_SECRET')
-    with pytest.raises(ValueError): Settings.from_env()
-
-
-def test_expired_or_tampered_session_cannot_read_documents(portal):
-    import base64
-    import json
-    import time
-    from itsdangerous import TimestampSigner
-    client, _, settings=portal
-    login(client)
-    cookie=client.cookies.get(settings.session_cookie)
-    client.cookies.clear()
-    client.cookies.set(settings.session_cookie,cookie[:-8]+'tampered')
-    assert client.get('/documents',follow_redirects=False).status_code==303
-    payload={'user_id':1,'session_version':1,'expires_at':int(time.time())-1,'csrf_token':'t'*48}
-    signed=TimestampSigner(settings.session_secret).sign(base64.b64encode(json.dumps(payload).encode())).decode()
-    client.cookies.clear()
-    client.cookies.set(settings.session_cookie,signed)
-    assert client.get('/documents/2',follow_redirects=False).status_code==303
-
-
-def test_production_cookie_headers_https_and_host_guard(portal):
-    from dataclasses import replace
-    from app import create_app
-    _, db, settings=portal
-    settings=replace(settings,environment='production',https_only=True,allowed_hosts=('testserver',))
-    with TestClient(create_app(settings,db),base_url='https://testserver') as client:
-        response=client.get('/login')
-        cookie=response.headers['set-cookie'].lower()
-        assert 'httponly' in cookie and 'secure' in cookie and 'samesite=lax' in cookie
-        assert response.headers['cache-control']=='no-store'
-        assert 'frame-ancestors' in response.headers['content-security-policy']
-        assert response.headers['strict-transport-security']=='max-age=31536000'
-        assert client.get('http://testserver/login',follow_redirects=False).status_code==307
-        assert client.get('https://evil.example/login').status_code==400
-
-
-def test_department_disabled_unknown_role_and_query_validation(portal):
-    client, db, _=portal
-    login(client)
-    assert client.get('/documents?q=%25').status_code==200
-    assert 'href="/documents/2"' not in client.get('/documents?q=%25').text
-    assert 'href="/documents/2"' not in client.get('/documents',params={'q':"' OR 1=1 --"}).text
-    assert client.get('/documents?page=0').status_code==422
-    assert client.get('/documents/-1').status_code==422
-    assert client.get('/documents',params={'q':'x'*101}).status_code==422
-    db.execute('UPDATE users SET role=%s WHERE id=1',('unrecognized',))
-    assert client.get('/documents/2').status_code==404
-    db.execute('UPDATE departments SET is_active=0 WHERE id=1')
-    assert client.get('/documents',follow_redirects=False).status_code==303
-
-
-def test_database_failure_returns_generic_service_page(portal):
+def test_database_failure_returns_generic_errors(portal):
     import mysql.connector
-    client, db, _=portal
-    login(client)
+    client, db, _ = portal
+    headers = bearer(client)
     def unavailable():
         raise mysql.connector.InterfaceError('private database error text')
-    db.connection_factory=unavailable
-    response=client.get('/documents')
-    assert response.status_code==503
+    db.connection_factory = unavailable
+    response = client.get('/api/documents', headers=headers)
+    assert assert_error(response, 503) == '資料服務暫時無法使用，請稍後再試'
     assert 'private database error text' not in response.text
-    assert '服務暫時無法使用' in response.text
+
+
+def test_production_configuration_and_headers(portal, monkeypatch):
+    from dataclasses import replace
+    from app import create_app
+    from core.config import Settings
+    monkeypatch.setenv('APP_ENV', 'production')
+    monkeypatch.setenv('ALLOWED_HOSTS', 'portal.example.com')
+    for name in ('DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_SSL_CA'):
+        monkeypatch.setenv(name, 'configured')
+    monkeypatch.setenv('DB_ENGINE', 'sqlite')
+    with pytest.raises(ValueError, match='DB_ENGINE'): Settings.from_env()
+    monkeypatch.setenv('DB_ENGINE', 'mysql')
+    assert Settings.from_env().environment == 'production'
+    monkeypatch.delenv('DB_SSL_CA')
+    with pytest.raises(ValueError, match='DB_SSL_CA'): Settings.from_env()
+    monkeypatch.setenv('DB_SSL_CA', 'configured')
+    monkeypatch.setenv('ALLOWED_HOSTS', '*')
+    with pytest.raises(ValueError, match='ALLOWED_HOSTS'): Settings.from_env()
+
+    _, db, settings = portal
+    settings = replace(settings, environment='production', allowed_hosts=('testserver',))
+    with TestClient(create_app(settings, db), base_url='https://testserver') as client:
+        response = client.get('/login')
+        assert 'set-cookie' not in response.headers
+        assert response.headers['cache-control'] == 'no-store'
+        assert "script-src 'self'" in response.headers['content-security-policy']
+        assert response.headers['strict-transport-security'] == 'max-age=31536000'
+        assert client.get('http://testserver/login', follow_redirects=False).status_code == 307
+        assert client.get('https://evil.example/login').status_code == 400

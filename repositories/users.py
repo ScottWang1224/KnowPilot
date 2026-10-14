@@ -1,29 +1,55 @@
-"""Employee records and atomic, database-backed login throttling."""
+"""Accounts, departments and atomic, database-backed login throttling."""
 import hashlib
 from datetime import datetime, timedelta, timezone
 
-USER_SELECT = '''SELECT u.id,u.employee_no,u.display_name,u.department_id,u.role,
-                        u.is_active,u.session_version,d.name AS department_name
-                 FROM users u JOIN departments d ON d.id=u.department_id
-                 WHERE u.is_active=1 AND d.is_active=1'''
+USER_SELECT = '''SELECT u.id,u.email,u.name,u.department_id,u.role,u.is_active,u.created_at,
+                        d.name AS department_name
+                 FROM users u JOIN departments d ON d.id=u.department_id'''
+ACTIVE = ' WHERE u.is_active=1 AND d.is_active=1'
 
 
 def by_id(db,user_id):
-    return db.query(USER_SELECT+' AND u.id=%s',(user_id,),one=True)
+    return db.query(USER_SELECT+ACTIVE+' AND u.id=%s',(user_id,),one=True)
 
 
-def by_employee_no(db,employee_no):
-    return db.query(USER_SELECT.replace('u.id,u.employee_no','u.password_hash,u.id,u.employee_no')+
-                    ' AND u.employee_no=%s',(employee_no,),one=True)
+def by_email(db,email):
+    return db.query(USER_SELECT.replace('SELECT u.id','SELECT u.password_hash,u.id')+ACTIVE+' AND u.email=%s',(email,),one=True)
 
 
-def revoke_sessions(db,user_id):
-    db.execute('UPDATE users SET session_version=session_version+1 WHERE id=%s',(user_id,))
+def create(db,*,email,name,password_hash,department_id,role='user'):
+    with db.transaction() as cursor:
+        cursor.execute('INSERT INTO users(email,name,password_hash,department_id,role) VALUES(%s,%s,%s,%s,%s)',
+                       (email,name,password_hash,department_id,role))
+        return cursor.lastrowid
 
 
-def consume_login_attempt(db,address,settings):
+def change_department(db,user_id,department_id):
+    """Demo feature: move the user and hide their conversations in one transaction.
+
+    Returns the number of conversations hidden.
+    """
+    with db.transaction() as cursor:
+        cursor.execute('UPDATE users SET department_id=%s WHERE id=%s',(department_id,user_id))
+        # TODO(chat): when conversations exist, in this same transaction:
+        # UPDATE conversations SET hidden_at=<now> WHERE user_id=%s AND hidden_at IS NULL
+        return 0
+
+
+def all_users(db):
+    return db.query(USER_SELECT+' ORDER BY u.id')
+
+
+def departments(db):
+    return db.query('SELECT id,code,name FROM departments WHERE is_active=1 ORDER BY id')
+
+
+def department_exists(db,department_id):
+    return db.query('SELECT id FROM departments WHERE id=%s AND is_active=1',(department_id,),one=True) is not None
+
+
+def consume_attempt(db,action,address,settings):
     now=datetime.now(timezone.utc).replace(tzinfo=None,microsecond=0)
-    key=hashlib.sha256(('ip:'+address).encode()).hexdigest()
+    key=hashlib.sha256(f'{action}:ip:{address}'.encode()).hexdigest()
     with db.transaction() as cursor:
         cursor.execute('''INSERT IGNORE INTO login_attempts(key_hash,attempts,window_started_at)
                           VALUES(%s,%s,%s)''',(key,0,now))

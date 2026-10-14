@@ -1,0 +1,37 @@
+{% from 'macros.html' import icon %}
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>註冊帳號 · KnowPilot</title>
+  <link rel="stylesheet" href="/static/css/index.css">
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body class="login-body" data-page="register">
+  <main class="login-layout">
+    <section class="login-form-panel" aria-labelledby="register-title">
+      <div class="login-form-wrap">
+        <span class="login-top-label">CREATE ACCOUNT</span>
+        <h1 id="register-title">註冊帳號</h1>
+        <p class="muted">選擇所屬部門，體驗依部門權限查詢文件。</p>
+        <div class="alert" role="alert" hidden></div>
+        <form class="login-form" id="register-form" novalidate>
+          <label for="name">名稱</label>
+          <input id="name" name="name" type="text" maxlength="50" autocomplete="name" placeholder="你的顯示名稱" required autofocus>
+          <label for="email">電子信箱</label>
+          <input id="email" name="email" type="email" maxlength="254" autocomplete="email" placeholder="name@example.com" required>
+          <label for="password">密碼</label>
+          <input id="password" name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" placeholder="至少 8 個字元" required>
+          <label for="department">部門</label>
+          <select id="department" name="department_id" required><option value="">請選擇部門</option></select>
+          <button type="submit" class="button button-primary">註冊並登入 {{ icon('arrow') }}</button>
+        </form>
+        <p class="login-help">Demo 測試功能：部門可自由選擇，註冊後也能在個人資料頁切換。<br>已有帳號？<a class="text-link" href="/login">返回登入</a></p>
+        <div class="login-security">{{ icon('lock') }} 密碼以雜湊方式儲存</div>
+      </div>
+      <footer class="login-footer">KnowPilot AI Assistant · 虛構企業期初展示</footer>
+    </section>
+  </main>
+</body>
+</html>

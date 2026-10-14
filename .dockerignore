@@ -10,6 +10,8 @@ __pycache__/
 .pytest_cache/
 .test-artifacts/
 .worktrees/
+.data/
 tests/
 *.log
 *.pyc
+.agent-local/

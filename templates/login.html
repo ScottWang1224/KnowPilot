@@ -4,34 +4,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>登入工作平台 · SmartFab</title>
+  <title>登入工作平台 · KnowPilot</title>
   <link rel="stylesheet" href="/static/css/index.css">
+  <script src="/static/js/app.js" defer></script>
 </head>
-<body class="login-body">
+<body class="login-body" data-page="login">
   <main class="login-layout">
     <section class="login-form-panel" aria-labelledby="login-title">
       <div class="login-form-wrap">
         <span class="login-top-label">EMPLOYEE ACCESS</span>
         <h1 id="login-title">登入工作平台</h1>
-        <p class="muted">{{ '輸入任意帳號與密碼，即可進入展示平台。' if demo_login else '請使用公司員工編號與密碼登入。' }}</p>
-        {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
-        <form action="/login" method="post" class="login-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="next" value="{{ next_path }}">
-          <label for="employee_no">{{ '帳號' if demo_login else '員工編號' }}</label>
-          <input id="employee_no" name="employee_no" type="text" maxlength="32" autocomplete="username" placeholder="{{ '輸入任意帳號' if demo_login else '例如 MFG001' }}" value="{{ employee_no | default('') }}" required autofocus>
+        <p class="muted">請使用註冊時的電子信箱與密碼登入。</p>
+        <div class="alert" role="alert" hidden></div>
+        <form class="login-form" id="login-form" novalidate>
+          <label for="email">電子信箱</label>
+          <input id="email" name="email" type="email" maxlength="254" autocomplete="username" placeholder="name@example.com" required autofocus>
           <label for="password">密碼</label>
-          <input id="password" name="password" type="password" maxlength="256" autocomplete="current-password" placeholder="{{ '輸入任意密碼' if demo_login else '輸入你的登入密碼' }}" required>
+          <input id="password" name="password" type="password" maxlength="128" autocomplete="current-password" placeholder="輸入你的登入密碼" required>
           <button type="submit" class="button button-primary">登入 {{ icon('arrow') }}</button>
         </form>
-        {% if demo_login %}
-        <p class="login-help">目前為展示模式，不驗證帳號密碼。<br>登入後以展示員工身分瀏覽工作平台。</p>
-        {% else %}
-        <p class="login-help">帳號由公司管理員建立。<br>若無法登入，請聯絡行政管理部門。</p>
-        {% endif %}
-        <div class="login-security">{{ icon('lock') }} {{ 'SmartFab 期初展示' if demo_login else '僅供授權員工使用' }}</div>
+        <p class="login-help">還沒有帳號？<a class="text-link" href="/register">註冊新帳號</a></p>
+        <div class="login-security">{{ icon('lock') }} 僅供授權員工使用</div>
       </div>
-      <footer class="login-footer">SmartFab AI Assistant · 虛構企業期初展示</footer>
+      <footer class="login-footer">KnowPilot AI Assistant · 虛構企業期初展示</footer>
     </section>
   </main>
 </body>

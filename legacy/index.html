@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>圖文留言板</title>
+
+    <link rel="stylesheet" href="/static/css/index.css" />
+  </head>
+
+  <body>
+    <main class="container">
+      <h1>發表一篇圖文</h1>
+
+      <form id="post-form">
+        <div>
+          <label for="content">文字內容</label>
+          <input type="text" id="content" name="content" required />
+        </div>
+
+        <div>
+          <label for="image">圖片檔案</label>
+          <input
+            type="file"
+            id="image"
+            name="image"
+            accept="image/*"
+            required
+          />
+        </div>
+
+        <button type="submit">送出</button>
+      </form>
+
+      <hr />
+
+      <section id="post-list">
+        <p>目前尚無文章</p>
+      </section>
+    </main>
+    <script>
+      const form = document.getElementById("post-form");
+      const postList = document.getElementById("post-list");
+
+      async function loadPosts() {
+        const response = await fetch("/api/posts");
+        const result = await response.json();
+
+        postList.innerHTML = "";
+
+        if (result.data.length === 0) {
+          postList.innerHTML = "<p>目前尚無文章</p>";
+          return;
+        }
+
+        result.data.forEach((post) => {
+          const article = document.createElement("article");
+
+          article.innerHTML = `
+                <p>${post.content}</p>
+
+                <img
+                    src="${post.image_url}"
+                    alt="文章圖片"
+                    style="max-width: 300px;"
+                >
+
+                <hr>
+            `;
+
+          postList.appendChild(article);
+        });
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const formData = new FormData(form);
+
+        const response = await fetch("/api/posts", {
+          method: "POST",
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (result.ok) {
+          form.reset();
+          loadPosts();
+        }
+      });
+
+      loadPosts();
+    </script>
+  </body>
+</html>

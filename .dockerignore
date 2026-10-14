@@ -1,0 +1,15 @@
+venv/
+.venv/
+__pycache__/
+.git/
+.env
+.env.*
+.aws/
+.codex/
+.agents/
+.pytest_cache/
+.test-artifacts/
+.worktrees/
+tests/
+*.log
+*.pyc

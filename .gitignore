@@ -11,6 +11,8 @@ __pycache__/
 .worktrees/
 .data/
 *.log
+/data/world.md
+/scripts/check_data.py
 
 .aws/
 *.pem

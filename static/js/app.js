@@ -85,6 +85,129 @@ function truncate(text, length) {
   return (space >= 0 ? cut.slice(0, space) : cut) + '...';
 }
 
+/* Markdown subset used by data/ files: headings, paragraphs, nested lists, tables, quotes, rules,
+   **bold** and `code`. Built from DOM nodes so content never reaches innerHTML. */
+const MD_LIST_ITEM = /^(\s*)([-*]|\d+\.)\s+(.*)$/;
+const MD_TABLE_ROW = /^\s*\|.*\|\s*$/;
+const MD_TABLE_RULE = /^\s*\|[\s:|-]+\|\s*$/;
+
+function appendInline(parent, text) {
+  let last = 0;
+  for (const match of text.matchAll(/\*\*([^*]+)\*\*|`([^`]+)`/g)) {
+    parent.append(text.slice(last, match.index));
+    const node = document.createElement(match[1] !== undefined ? 'strong' : 'code');
+    node.textContent = match[1] ?? match[2];
+    parent.append(node);
+    last = match.index + match[0].length;
+  }
+  parent.append(text.slice(last));
+  return parent;
+}
+
+function mdElement(tag, text) { return appendInline(document.createElement(tag), text); }
+function mdIndent(line) { return line.match(/^\s*/)[0].length; }
+function mdCells(line) { return line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim()); }
+
+function mdBlockStart(lines, i) {
+  const line = lines[i];
+  return /^#{1,6}\s/.test(line) || /^\s*(-{3,}|\*{3,})\s*$/.test(line) || line.startsWith('>')
+    || MD_LIST_ITEM.test(line) || (MD_TABLE_ROW.test(line) && MD_TABLE_RULE.test(lines[i + 1] || ''));
+}
+
+function mdList(lines, start, indent) {
+  const ordered = /^\s*\d+\./.test(lines[start]);
+  const list = document.createElement(ordered ? 'ol' : 'ul');
+  if (ordered) list.start = parseInt(lines[start], 10);
+  let i = start;
+  let item = null;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      let next = i + 1;
+      while (next < lines.length && !lines[next].trim()) next++;
+      if (next < lines.length && MD_LIST_ITEM.test(lines[next]) && mdIndent(lines[next]) >= indent) { i = next; continue; }
+      break;
+    }
+    const match = line.match(MD_LIST_ITEM);
+    const depth = mdIndent(line);
+    if (match && depth === indent) {
+      if (/^\d+\./.test(match[2]) !== ordered) break;
+      item = mdElement('li', match[3]);
+      list.append(item);
+      i++;
+    } else if (item && depth > indent && match) {
+      const [child, next] = mdList(lines, i, depth);
+      item.append(child);
+      i = next;
+    } else if (item && depth > indent) {
+      appendInline(item, ' ' + line.trim());
+      i++;
+    } else break;
+  }
+  return [list, i];
+}
+
+function renderMarkdown(text) {
+  const fragment = document.createDocumentFragment();
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (!line.trim()) {
+      i++;
+    } else if (heading) {
+      fragment.append(mdElement('h' + Math.min(Math.max(heading[1].length, 2), 4), heading[2]));
+      i++;
+    } else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+      fragment.append(document.createElement('hr'));
+      i++;
+    } else if (MD_TABLE_ROW.test(line) && MD_TABLE_RULE.test(lines[i + 1] || '')) {
+      const table = document.createElement('table');
+      const head = table.createTHead().insertRow();
+      mdCells(line).forEach((cell) => head.append(mdElement('th', cell)));
+      const body = table.createTBody();
+      for (i += 2; i < lines.length && MD_TABLE_ROW.test(lines[i]); i++) {
+        const row = body.insertRow();
+        mdCells(lines[i]).forEach((cell) => row.append(mdElement('td', cell)));
+      }
+      const wrap = document.createElement('div');
+      wrap.className = 'table-wrap';
+      wrap.append(table);
+      fragment.append(wrap);
+    } else if (line.startsWith('>')) {
+      const parts = [];
+      for (; i < lines.length && lines[i].startsWith('>'); i++) parts.push(lines[i].replace(/^>\s?/, ''));
+      const quote = document.createElement('blockquote');
+      quote.append(mdElement('p', parts.join(' ')));
+      fragment.append(quote);
+    } else if (MD_LIST_ITEM.test(line)) {
+      const [list, next] = mdList(lines, i, mdIndent(line));
+      fragment.append(list);
+      i = next;
+    } else {
+      const parts = [];
+      for (; i < lines.length && lines[i].trim() && (!parts.length || !mdBlockStart(lines, i)); i++) parts.push(lines[i].trim());
+      fragment.append(mdElement('p', parts.join(' ')));
+    }
+  }
+  return fragment;
+}
+
+// Excerpts for list pages: Markdown symbols removed, one line of plain text.
+function plainText(markdown) {
+  return markdown.split('\n')
+    .filter((line) => !MD_TABLE_RULE.test(line) && !/^\s*(-{3,}|\*{3,})\s*$/.test(line))
+    .map((line) => line.replace(/^\s*(#{1,6}|>|[-*]|\d+\.)\s+/, '').replace(/\|/g, ' ').replace(/\*\*|`/g, '').trim())
+    .filter(Boolean).join(' ').replace(/\s+/g, ' ');
+}
+
+function fillMarkdown(root, fields) {
+  for (const [name, value] of Object.entries(fields)) {
+    root.querySelectorAll(`[data-markdown="${name}"]`).forEach((node) => { node.replaceChildren(renderMarkdown(value || '')); });
+  }
+}
+
 function fill(root, fields) {
   for (const [name, value] of Object.entries(fields)) {
     root.querySelectorAll(`[data-field="${name}"]`).forEach((node) => { node.textContent = value ?? ''; });
@@ -169,7 +292,7 @@ const PAGES = {
     main.querySelector('[data-document-count]').dataset.documentCount = documents.total;
     renderList(document.getElementById('announcement-preview'), announcements.data.slice(0, 3), 'tpl-announcement-preview',
       (item) => ({ category: item.category, is_pinned: item.is_pinned, date: taipeiDate(item.published_at),
-        title: item.title, excerpt: truncate(item.content, 85) }),
+        title: item.title, excerpt: truncate(plainText(item.content), 85) }),
       (item) => '/announcements/' + item.id);
     renderList(document.getElementById('recent-documents'), documents.data.slice(0, 4), 'tpl-document-row',
       (doc) => ({ ...documentFields(doc), version: 'v' + doc.version }), (doc) => '/documents/' + doc.id);
@@ -181,7 +304,7 @@ const PAGES = {
     fill(document.getElementById('main-content'), { total: result.total });
     renderList(document.getElementById('announcement-list'), result.data, 'tpl-announcement',
       (item) => ({ category: item.category, is_pinned: item.is_pinned, title: item.title,
-        excerpt: truncate(item.content, 100), date: taipeiDate(item.published_at) }),
+        excerpt: truncate(plainText(item.content), 100), date: taipeiDate(item.published_at) }),
       (item) => '/announcements/' + item.id);
     renderPagination('/announcements', result);
   },
@@ -190,8 +313,9 @@ const PAGES = {
     const article = document.querySelector('[data-id]');
     const { data: item } = await api('/api/announcements/' + article.dataset.id);
     document.title = item.title + ' · KnowPilot';
-    fill(article, { category: item.category, is_pinned: item.is_pinned, title: item.title, content: item.content,
+    fill(article, { category: item.category, is_pinned: item.is_pinned, title: item.title,
       published: '發布時間 ' + taipeiDate(item.published_at), author: item.author_name || '系統管理員' });
+    fillMarkdown(article, { content: item.content });
   },
 
   async documents() {
@@ -213,7 +337,8 @@ const PAGES = {
     const article = document.querySelector('[data-id]');
     const { data: doc } = await api('/api/documents/' + article.dataset.id);
     document.title = doc.title + ' · KnowPilot';
-    fill(article, { ...documentFields(doc), content: doc.content, version: '版本 ' + doc.version });
+    fill(article, { ...documentFields(doc), version: '版本 ' + doc.version });
+    fillMarkdown(article, { content: doc.content });
   },
 
   async assistant() {},

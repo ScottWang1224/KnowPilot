@@ -16,6 +16,13 @@ cp .env.example .env                      # 填入 JWT_SECRET；預設 DB_ENGINE
 
 一般帳號從 `/register` 註冊，註冊時可自選部門（Demo 設計，可在個人資料頁切換）。
 
+## 展示資料（`data/`）
+
+- `data/documents/{部門}/*.md`、`data/announcements/*.md`：Markdown + YAML front matter，由 `scripts.seed` 匯入；只新增、不覆蓋（以 `document_code`／`seed_key` 判斷）。
+- `data/eval/questions.yaml`：RAG 評測題目。
+- 所有公司、人員、客戶、設備與數值皆為虛構展示資料。
+- 已存在的文件不會被 seed 更新；本機要套用改寫後的內容，需刪除 `.data/knowpilot.db` 後重新 migrate 與 seed。
+
 ## 認證與權限
 
 - `POST /api/auth/login` 回傳 JWT，前端存在 localStorage，以 `Authorization: Bearer` 呼叫 API。

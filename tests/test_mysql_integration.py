@@ -41,7 +41,7 @@ def test_mysql_migration_seed_and_authorization(mysql_db):
     assert migrate(db,'mysql')==[]
     seed(db)
     seed(db)
-    assert db.query('SELECT COUNT(*) AS n FROM documents',one=True)['n']==8
+    assert db.query('SELECT COUNT(*) AS n FROM documents',one=True)['n']==73
     password=secrets.token_urlsafe(24)
     seed_admin(db,email='owner@example.com',name='Owner',password=password,department_code='ADM')
     rd=db.query('SELECT id FROM departments WHERE code=%s',('RD',),one=True)['id']
@@ -49,8 +49,8 @@ def test_mysql_migration_seed_and_authorization(mysql_db):
     admin=users.by_email(db,'owner@example.com')
     employee=users.by_email(db,'rd@example.com')
     assert admin['role']=='admin'
-    assert content.document_count(db,admin)==3
-    assert content.document_count(db,employee)==5
+    assert content.document_count(db,admin)==13+5
+    assert content.document_count(db,employee)==13+10
     mfg=db.query('SELECT id FROM documents WHERE document_code=%s',('MFG-SOP-001',),one=True)
     assert content.document(db,employee,mfg['id']) is None
     assert db.query('SELECT COUNT(*) AS n FROM schema_migrations',one=True)['n']==1

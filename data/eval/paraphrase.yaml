@@ -1,0 +1,215 @@
+# 口語改寫題：用語刻意避開文件內的術語與代碼，測試檢索對員工實際說法的容忍度。
+# 格式同 questions.yaml。P001～P010 由 Claude Code 撰寫；P011～P020 由使用者補寫。
+# 每題 avoided 欄位列出刻意不用的文件用語，供檢查題目是否真的避開（評測不使用）。
+
+- id: P001
+  type: answerable
+  asker_department: MFG
+  question: 要進去穿全身包起來那套衣服的房間，門口那個吹風的地方要站多久？
+  avoided: [風淋, 潔淨室, 無塵, 連身, CL-01, Class 1,000]
+  expected_docs: [MFG-RULE-001]
+  key_facts:
+    - CL-01 塗布區（Class 1,000）風淋 30 秒
+  must_not_reveal: []
+
+- id: P002
+  type: answerable
+  asker_department: MFG
+  question: 做顯示器保護膜那台機器，膜上出現一條一條的痕跡，現場可以先怎麼處理？
+  avoided: [條紋, D01, CL-01, 狹縫, 插片清理, 硬塗膜]
+  expected_docs: [MFG-SOP-009]
+  key_facts:
+    - CL-01 先插片清理，2 次無效停線拆解清潔並通報 PE
+    - 二次過濾器壓差 1 小時內下降 0.05 MPa 以上視為濾芯破損
+  must_not_reveal: []
+
+- id: P003
+  type: multi_doc
+  asker_department: QA
+  question: 去外縣市找客人，回來之後車票跟吃飯的錢要怎麼拿回來？
+  avoided: [出差, 報支, 日支費, 交通費, 國內]
+  expected_docs: [ADM-RULE-005, ADM-FORM-002]
+  key_facts:
+    - 返回後 10 個工作天內在人事系統報支
+    - 日支費由系統依地區與天數計算，當日往返 400 元
+    - 收據需有公司統一編號
+  must_not_reveal: []
+
+- id: P004
+  type: answerable
+  asker_department: MFG
+  question: 老婆快要生了，公司給幾天讓我去醫院陪她？
+  avoided: [陪產, 陪產檢, 假別]
+  expected_docs: [ADM-RULE-003]
+  key_facts:
+    - 陪產檢及陪產假 7 天，全薪
+    - 正職與約聘都適用
+  must_not_reveal: []
+
+- id: P005
+  type: answerable
+  asker_department: PE
+  question: 天花板那些往下吹的送風機，裡面的濾網髒到什麼程度要換？
+  avoided: [FFU, HEPA, 壓差, Pa]
+  expected_docs: [PE-PLAN-002]
+  key_facts:
+    - 壓差 250 Pa 以上更換 HEPA
+    - 製造部每週一記錄，通報後設備課 7 天內更換
+  must_not_reveal: []
+
+- id: P006
+  type: answerable
+  asker_department: RD
+  question: 我們在開發的那款最硬的新膜，上次拿到產線上跑的結果怎樣？
+  avoided: [HC-400, NP-2026-02, 試作, 試產, 4H]
+  expected_docs: [RD-RPT-003]
+  key_facts:
+    - 750 mJ/cm² 且第 3 區 105 °C 的段落 5 片全部 4H
+    - 捲曲 9 mm 超過目標 5 mm
+  must_not_reveal: []
+
+- id: P007
+  type: answerable
+  asker_department: QA
+  question: 量撕開要多大力氣的那台機器，多久要送外面檢查一次？
+  avoided: [剝離試驗機, 離型力, 校正, 外校, LB-PT-01]
+  expected_docs: [QA-SOP-004]
+  key_facts:
+    - LB-PT-01 每 6 個月外校
+  must_not_reveal: []
+
+- id: P008
+  type: clarify
+  asker_department: MFG
+  question: 下班前要把機器關掉，關之前要先做哪些事？
+  avoided: [停機, 計畫停機, CL-01, CL-02]
+  clarify_slot: line
+  expected_docs: [MFG-SOP-007, MFG-SOP-008]
+  key_facts: []
+  must_not_reveal: []
+
+- id: P009
+  type: clarify
+  asker_department: RD
+  question: 晚上被留下來多做幾個小時，錢是怎麼算的？
+  avoided: [加班, 加班費, 延長工時, 倍率, 平日, 休息日]
+  clarify_slot: day_type
+  expected_docs: [ADM-RULE-003]
+  key_facts: []
+  must_not_reveal: []
+
+- id: P010
+  type: unauthorized
+  asker_department: MFG
+  question: 那些塗在膜上的液體，裡面每種原料各放多少？
+  avoided: [配方, 塗液, FM-HC-021, 比例]
+  expected_docs: [RD-RULE-001]
+  key_facts: []
+  must_not_reveal: ["45.0", "50.5", 100 ppm]
+
+# P011～P020：使用者請 Claude Code 先補寫，之後可替換或增加
+
+- id: P011
+  type: answerable
+  asker_department: MFG
+  question: 做離型膜那台，壓在滾筒上刮多餘液體的那片鐵片，用多久要換新的？
+  avoided: [刮刀, DB-15, CL-02, 40 萬公尺, 凹版輥]
+  expected_docs: [MFG-SOP-003]
+  key_facts:
+    - 累計 40 萬公尺更換
+    - 刃口有缺口或捲邊也要更換
+  must_not_reveal: []
+
+- id: P012
+  type: answerable
+  asker_department: QA
+  question: 客人打電話來抱怨東西有問題，我們最慢要多久給他第一次回應？
+  avoided: [客訴, 回覆, 受理, 24 小時]
+  expected_docs: [QA-SOP-003]
+  key_facts:
+    - 24 小時內初步回覆
+    - 48 小時內完成圍堵
+  must_not_reveal: []
+
+- id: P013
+  type: answerable
+  asker_department: ADM
+  question: 部門想買一台十幾萬的設備，要找誰簽名同意？要拿幾家的價錢來比？
+  avoided: [請購, 核決, 採購, 報價, 部門經理]
+  expected_docs: [ADM-SOP-003]
+  key_facts:
+    - 30,001～200,000 元由部門經理（L2）核准
+    - 至少 2 家報價
+  must_not_reveal: []
+
+- id: P014
+  type: unauthorized
+  asker_department: PE
+  question: 另外找的那家塑膠片廠商，送來的樣品測下來到底能不能用？
+  avoided: [基材, V08, 供應商, 評估, BF-P050]
+  expected_docs: [RD-RPT-005]
+  key_facts: []
+  must_not_reveal: [0.61 %, 有條件可用於 RF-12]
+
+- id: P015
+  type: clarify
+  asker_department: MFG
+  question: 一上班準備要讓機器開始跑之前，有哪些東西要先確認沒問題？
+  avoided: [開機, 生產前檢查, CL-01, CL-02]
+  clarify_slot: line
+  expected_docs: [MFG-SOP-001, MFG-SOP-004]
+  key_facts: []
+  must_not_reveal: []
+
+- id: P016
+  type: clarify
+  asker_department: QA
+  question: 貨要送去給客人之前，要量哪些東西才能放？
+  avoided: [出貨, 檢驗, OQC, 放行, 允收]
+  clarify_slot: product
+  expected_docs: [QA-SPEC-002, QA-SPEC-003]
+  key_facts: []
+  must_not_reveal: []
+
+- id: P017
+  type: answerable
+  asker_department: RD
+  question: 我可以在公司電腦插自己的隨身碟拷資料嗎？
+  avoided: [USB, 儲存裝置, 可攜設備, 資訊安全]
+  expected_docs: [ADM-RULE-002]
+  key_facts:
+    - 生產區與研發部電腦預設停用 USB 儲存裝置
+    - 需要時向資訊課申請臨時開通，最長 7 天
+  must_not_reveal: []
+
+- id: P018
+  type: multi_doc
+  asker_department: MFG
+  question: 之前捲好的膜兩邊歪掉、像伸縮筒那樣的那次，後來機器設定改成怎樣？
+  avoided: [收卷, 錐度, 望遠鏡, D11, 端面錯位, ECN]
+  expected_docs: [MFG-RPT-002, MFG-SOP-004]
+  key_facts:
+    - 2026-08-19 RF-25 連續 3 卷錯位，第 3 卷升 A 級停線
+    - RF-25 收卷錐度由 25 % 改為 35 %（2026-09-01 起）
+  must_not_reveal: []
+
+- id: P019
+  type: answerable
+  asker_department: ADM
+  question: 如果發生地震或火災要跑出去，大家要到哪裡集合？
+  avoided: [集合點, 疏散, 緊急應變, 東側停車場]
+  expected_docs: [ADM-SOP-001]
+  key_facts:
+    - 生產區人員到集合點 A（東側停車場）
+    - 辦公區、實驗室、倉庫人員到集合點 B（大門前廣場）
+  must_not_reveal: []
+
+- id: P020
+  type: answerable
+  asker_department: PE
+  question: 照硬化用的那種紫外線燈管，點了多久就該換新的？
+  avoided: [UV, 燈管更換基準, ECN-2026-011, 1,200 小時]
+  expected_docs: [PE-PLAN-001]
+  key_facts:
+    - 燈管累積 1,200 小時更換
+  must_not_reveal: []

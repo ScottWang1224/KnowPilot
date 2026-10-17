@@ -37,7 +37,7 @@ def test_mysql_migration_seed_and_authorization(mysql_db):
     from scripts.seed_admin import seed_admin
     from repositories import content,users
     db=mysql_db
-    assert migrate(db,'mysql')==['001_init.sql']
+    assert migrate(db,'mysql')==['001_init.sql','002_document_metadata.sql']
     assert migrate(db,'mysql')==[]
     seed(db)
     seed(db)
@@ -53,7 +53,7 @@ def test_mysql_migration_seed_and_authorization(mysql_db):
     assert content.document_count(db,employee)==13+10
     mfg=db.query('SELECT id FROM documents WHERE document_code=%s',('MFG-SOP-001',),one=True)
     assert content.document(db,employee,mfg['id']) is None
-    assert db.query('SELECT COUNT(*) AS n FROM schema_migrations',one=True)['n']==1
+    assert db.query('SELECT COUNT(*) AS n FROM schema_migrations',one=True)['n']==2
     with pytest.raises(Exception):
         db.execute('UPDATE documents SET department_id=NULL WHERE document_code=%s',('MFG-SOP-001',))
     with pytest.raises(Exception):

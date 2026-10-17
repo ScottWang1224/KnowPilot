@@ -4,6 +4,7 @@ Documents and announcements are read from data/ (Markdown with YAML front matter
 Existing rows, matched by document_code or seed_key, stay unchanged.
 Accounts come from registration or scripts.seed_admin.
 """
+import json
 from datetime import date, datetime, timedelta, timezone
 
 import yaml
@@ -68,11 +69,12 @@ def seed(db):
                 # the effective date doubles as the document's last-updated time.
                 department_id=departments[meta['department']] if meta['visibility']=='department' else None
                 effective=taipei_to_utc(meta['effective_date'])
+                applies_to=json.dumps(meta['applies_to'],ensure_ascii=False) if meta.get('applies_to') else None
                 cursor.execute('''INSERT INTO documents(document_code,title,summary,content,category,department_id,
-                                  visibility,version,status,created_at,updated_at)
-                                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                                  visibility,version,status,applies_to,created_at,updated_at)
+                                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
                                (meta['code'],meta['title'],meta['summary'],body,meta['category'],department_id,
-                                meta['visibility'],str(meta['version']),'published',effective,effective))
+                                meta['visibility'],str(meta['version']),'published',applies_to,effective,effective))
 
 
 if __name__=='__main__':

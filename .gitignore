@@ -22,3 +22,4 @@ id_rsa
 
 # Local AI agent collaboration records
 .agent-local/
+.eval-runs/

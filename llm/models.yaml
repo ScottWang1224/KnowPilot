@@ -1,0 +1,30 @@
+# 模型設定與價格。價格由專案擁有者依供應商官網填寫（美元／每百萬 token），程式不會自行填入。
+# 鍵為「供應商:模型 ID」，與 .env 的 LLM_ROUTER_MODEL／LLM_ANSWER_MODEL 寫法相同。
+#
+# 價格未填寫時：
+#   - 結果中的實際成本 cost_usd 為 None（報告顯示「無價格資料」）
+#   - 每日預算改用 LLM_FALLBACK_PRICE_PER_MTOK 保守估算，仍會計入
+#
+# 可用欄位（皆為選填）：
+#   input_per_mtok / output_per_mtok   每百萬 token 價格（美元）
+#   supports_temperature                是否送出 temperature。anthropic 預設 false（目前多數 Claude 模型不接受），
+#                                       openai_compatible 預設 true
+#   effort                              Anthropic 的 output_config.effort（low / medium / high ...）
+#   max_tokens_param                    openai_compatible 的輸出上限參數名稱，預設 max_tokens；
+#                                       部分模型要求 max_completion_tokens
+#   json_mode                           openai_compatible 是否啟用 response_format json_object（不取代 Pydantic 驗證）
+#   note                                備註
+#
+# 範例（填好價格後移除註解）：
+#   "anthropic:<model-id>":
+#     input_per_mtok:
+#     output_per_mtok:
+#     effort: low
+#     note: ""
+#   "openai_compatible:<model-id>":
+#     input_per_mtok:
+#     output_per_mtok:
+#     json_mode: true
+#     note: ""
+
+models: {}

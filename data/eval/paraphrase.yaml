@@ -115,6 +115,7 @@
   question: 做離型膜那台，壓在滾筒上刮多餘液體的那片鐵片，用多久要換新的？
   avoided: [刮刀, DB-15, CL-02, 40 萬公尺, 凹版輥]
   expected_docs: [MFG-SOP-003]
+  acceptable_docs: [MFG-SOP-009]
   key_facts:
     - 累計 40 萬公尺更換
     - 刃口有缺口或捲邊也要更換
@@ -199,6 +200,7 @@
   question: 如果發生地震或火災要跑出去，大家要到哪裡集合？
   avoided: [集合點, 疏散, 緊急應變, 東側停車場]
   expected_docs: [ADM-SOP-001]
+  acceptable_docs: [ANN:fire-drill-2026]
   key_facts:
     - 生產區人員到集合點 A（東側停車場）
     - 辦公區、實驗室、倉庫人員到集合點 B（大門前廣場）
@@ -210,6 +212,7 @@
   question: 照硬化用的那種紫外線燈管，點了多久就該換新的？
   avoided: [UV, 燈管更換基準, ECN-2026-011, 1,200 小時]
   expected_docs: [PE-PLAN-001]
+  acceptable_docs: [PE-SPEC-001, PE-SPEC-002, PE-SPEC-003, PE-RULE-001, ANN:ecn-2026-011]
   key_facts:
     - 燈管累積 1,200 小時更換
   must_not_reveal: []

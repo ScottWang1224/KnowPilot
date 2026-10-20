@@ -33,11 +33,25 @@ def _sections(body):
     for line in body.splitlines():
         heading = re.match(r'^##\s+(.+?)\s*$', line)
         if heading:
-            yield path, '\n'.join(lines).strip()
+            yield from _split_subsections(path, '\n'.join(lines).strip())
             path, lines = heading.group(1), []
         else:
             lines.append(line)
-    yield path, '\n'.join(lines).strip()
+    yield from _split_subsections(path, '\n'.join(lines).strip())
+
+
+def _split_subsections(path, text):
+    """A long `##` section that has `###` headings splits at them; the intro joins the first one."""
+    parts = re.split(r'^###\s+(.+?)\s*$', text, flags=re.M)
+    if len(text) <= MAX_CHARS or len(parts) == 1:
+        yield path, text
+        return
+    intro = parts[0].strip()
+    for i in range(1, len(parts), 2):
+        sub_text = parts[i + 1].strip()
+        if i == 1 and intro:
+            sub_text = f'{intro}\n\n{sub_text}'
+        yield f'{path} › {parts[i]}', sub_text
 
 
 def _split_long(text):

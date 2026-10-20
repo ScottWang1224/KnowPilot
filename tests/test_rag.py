@@ -34,6 +34,16 @@ def test_chunking_keeps_tables_drops_disclaimer_and_merges_short_sections():
     assert chunks[1].indexed_text.startswith('【X-SOP-001 測試｜3. 說明】')
 
 
+def test_chunking_splits_long_sections_at_subheadings_only_when_too_long():
+    from rag.chunking import chunk_document
+    long_body='## 2. 保養項目\n\n引言。\n\n### 2.1 CL-01\n\n'+'甲'*900+'\n\n### 2.2 CL-02\n\n'+'乙'*900
+    chunks=chunk_document('X-PLAN-001','測試',long_body)
+    assert [c.section_path for c in chunks]==['2. 保養項目 › 2.1 CL-01','2. 保養項目 › 2.2 CL-02']
+    assert chunks[0].text.startswith('引言。') and '乙' not in chunks[0].text
+    short_body='## 2. 保養項目\n\n### 2.1 CL-01\n\n'+'甲'*200+'\n\n### 2.2 CL-02\n\n'+'乙'*200
+    assert [c.section_path for c in chunk_document('X-PLAN-002','測試',short_body)]==['2. 保養項目']
+
+
 def test_search_never_returns_other_department_chunks_even_on_exact_match(seeded):
     from rag import index
     db,departments=seeded
@@ -50,7 +60,7 @@ def test_visible_catalog_lists_only_company_and_own_department(seeded):
     db,departments=seeded
     catalog=index.visible_catalog(db,{'department_id':departments['MFG']})
     codes={d['doc_code'] for d in catalog['documents']}
-    assert len(codes)==13+18 and not any(c.startswith(('RD-','PE-')) for c in codes)
+    assert len(codes)==18+18 and not any(c.startswith(('RD-','PE-')) for c in codes)
     assert 'ADM-RULE-005' in codes and len(catalog['announcements'])==20
     sop=next(d for d in catalog['documents'] if d['doc_code']=='MFG-SOP-010')
     assert sop['applies_to']=={'lines':['CL-02'],'products':['RF']}

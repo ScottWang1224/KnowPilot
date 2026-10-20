@@ -41,6 +41,15 @@ def recall(expected, docs, k, any_hit):
     return len(found) / len(expected)
 
 
+def hit_source(expected, acceptable, docs, k):
+    """Which list produced the hit within the first k documents: 'expected', 'acceptable' or None."""
+    if set(docs[:k]) & set(expected):
+        return 'expected'
+    if set(docs[:k]) & set(acceptable):
+        return 'acceptable'
+    return None
+
+
 def evaluate(db, questions):
     departments = {r['code']: r['id'] for r in db.query('SELECT id,code FROM departments')}
     results = []
@@ -49,12 +58,18 @@ def evaluate(db, questions):
         hits = index.search(db, user, q['question'], k=SEARCH_CHUNKS)
         docs = ranked_docs(hits)[:max(KS)]
         row = {'id': q['id'], 'type': q['type'], 'asker': q['asker_department'], 'question': q['question'],
-               'expected': q.get('expected_docs') or [], 'retrieved': docs,
+               'expected': q.get('expected_docs') or [], 'acceptable': q.get('acceptable_docs') or [], 'retrieved': docs,
                'chunks': [{'chunk_id': h.chunk_id, 'section': h.section_path, 'score': h.score} for h in hits]}
         if q['type'] in RECALL_TYPES:
-            row['ranks'] = {code: docs.index(code) + 1 if code in docs else None for code in row['expected']}
+            row['ranks'] = {code: docs.index(code) + 1 if code in docs else None for code in row['expected'] + row['acceptable']}
             for k in KS:
-                row[f'recall@{k}'] = recall(row['expected'], docs, k, any_hit=q['type'] == 'clarify')
+                if q['type'] == 'answerable':
+                    # Any expected or acceptable document answers the question.
+                    row[f'hit@{k}'] = hit_source(row['expected'], row['acceptable'], docs, k)
+                    row[f'recall@{k}'] = 1.0 if row[f'hit@{k}'] else 0.0
+                else:
+                    # multi_doc needs every expected document; clarify needs any. acceptable_docs is report-only.
+                    row[f'recall@{k}'] = recall(row['expected'], docs, k, any_hit=q['type'] == 'clarify')
             if q['type'] == 'clarify':
                 row['all_versions@10'] = set(row['expected']) <= set(docs)
         elif q['type'] == 'unauthorized':
@@ -70,6 +85,8 @@ def summarize(results):
         rows = [r for r in results if r['type'] == qtype]
         if rows:
             summary[qtype] = {'count': len(rows), **{f'recall@{k}': round(sum(r[f'recall@{k}'] for r in rows) / len(rows), 3) for k in KS}}
+            if qtype == 'answerable':
+                summary[qtype]['hits_via_acceptable@10'] = sum(r['hit@10'] == 'acceptable' for r in rows)
             if qtype == 'clarify':
                 summary[qtype]['all_versions@10'] = round(sum(r['all_versions@10'] for r in rows) / len(rows), 3)
     rows = [r for r in results if r['type'] == 'unauthorized']
@@ -85,13 +102,16 @@ def print_report(summary, results):
             print(f'{qtype:<14}{s["count"]:>5}{"權限通過率 " + format(s["pass_rate"], ".0%"):>21}')
             continue
         print(f'{qtype:<14}{s["count"]:>5}{s["recall@5"]:>10.3f}{s["recall@10"]:>11.3f}')
+        if s.get('hits_via_acceptable@10'):
+            print(f'{"":<19}其中 {s["hits_via_acceptable@10"]} 題只靠 acceptable_docs 命中（前 10 份）')
         if 'all_versions@10' in s:
             print(f'{"":<19}版本涵蓋率（預期文件全部在前 10 份）{s["all_versions@10"]:.3f}')
     print('\n每題結果（預期文件：文件排名，— 表示前 10 份內沒有）')
     for r in results:
         if 'ranks' in r:
-            ranks = '、'.join(f'{c}:{n or "—"}' for c, n in r['ranks'].items())
-            print(f'  {r["id"]} {r["type"]:<11} {r["asker"]:<4} R@5={r["recall@5"]:.2f} {ranks}')
+            ranks = '、'.join(f'{"（可接受）" if c in r["acceptable"] else ""}{c}:{n or "—"}' for c, n in r['ranks'].items())
+            via = '  ← 靠 acceptable_docs' if r.get('hit@10') == 'acceptable' else ''
+            print(f'  {r["id"]} {r["type"]:<11} {r["asker"]:<4} R@5={r["recall@5"]:.2f} {ranks}{via}')
         elif 'passed' in r:
             print(f'  {r["id"]} {r["type"]:<11} {r["asker"]:<4} {"通過" if r["passed"] else "洩漏 " + ",".join(r["leaked"])}')
     missed = [r for r in results if r.get('recall@10', 1) < 1 or r.get('all_versions@10') is False or r.get('passed') is False]

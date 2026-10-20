@@ -26,7 +26,7 @@ def test_migration_and_seed_reruns_preserve_existing_data(tmp_path):
     db.execute('UPDATE documents SET content=%s WHERE document_code=%s',('edited content','MFG-SOP-001'))
     seed(db)
     assert db.query('SELECT content FROM documents WHERE document_code=%s',('MFG-SOP-001',),one=True)['content']=='edited content'
-    assert db.query('SELECT COUNT(*) AS n FROM documents',one=True)['n']==73
+    assert db.query('SELECT COUNT(*) AS n FROM documents',one=True)['n']==78
     assert db.query('SELECT COUNT(*) AS n FROM announcements',one=True)['n']==20
     assert db.query('SELECT COUNT(*) AS n FROM users',one=True)['n']==0
 
@@ -45,10 +45,10 @@ def test_seed_reads_data_files_and_keeps_department_scope(tmp_path):
     welcome=db.query('SELECT * FROM announcements WHERE seed_key=%s',('welcome',),one=True)
     assert str(welcome['published_at']).startswith('2026-10-15 01:00')  # 09:00 Taipei stored as UTC
     company=db.query("SELECT COUNT(*) AS n FROM documents WHERE visibility='company' AND department_id IS NULL",one=True)['n']
-    assert company==13
+    assert company==18
     departments={r['code']:r['id'] for r in db.query('SELECT id,code FROM departments')}
     mfg_user={'department_id':departments['MFG']}
-    assert content.document_count(db,mfg_user)==13+18
+    assert content.document_count(db,mfg_user)==18+18
     rd_doc=db.query('SELECT id FROM documents WHERE document_code=%s',('RD-RULE-001',),one=True)
     company_doc=db.query('SELECT id FROM documents WHERE document_code=%s',('ADM-RULE-005',),one=True)
     assert content.document(db,mfg_user,rd_doc['id']) is None

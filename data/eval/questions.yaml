@@ -7,6 +7,7 @@
   asker_department: MFG
   question: CL-01 的 UV 燈管現在用到幾小時就要換？
   expected_docs: [MFG-SOP-001]
+  acceptable_docs: [ANN:ecn-2026-011]
   key_facts:
     - 燈管累積 1,200 小時更換
     - 依據 ECN-2026-011
@@ -153,6 +154,7 @@
   asker_department: RD
   question: 廠內緊急專線是幾號？
   expected_docs: [ADM-SOP-001]
+  acceptable_docs: [ADM-RULE-007, ANN:typhoon-rule]
   key_facts:
     - 廠內緊急專線 #999
     - 火災或有人受傷需送醫時同時撥 119
@@ -482,4 +484,88 @@
     - 18 件中纖維素纖維 11 件、無機粉塵 5 件、塗液凝膠 2 件
     - 根因是 3 台 FFU 壓差超標與換卷開門過久
     - CL-01 每萬公尺 D03 由 4 月 9.6 降到 5–8 月 1.1
+  must_not_reveal: []
+
+# ---------- 全公司共通知識（2026-10-20 新增）----------
+- id: Q051
+  type: answerable
+  asker_department: ADM
+  question: RF-25 這個產品是做什麼用的？主要賣給哪一類客戶？
+  expected_docs: [ADM-TRN-002]
+  key_facts:
+    - 中離型的離型膜
+    - 用於工業膠帶、光學膠，客戶為工業膠帶廠與光學膠廠
+  must_not_reveal: []
+
+- id: Q052
+  type: answerable
+  asker_department: RD
+  question: 產品從原料進廠到出貨，中間要經過哪些站？
+  expected_docs: [MFG-TRN-003]
+  key_facts:
+    - 原料進廠、IQC、塗液調配、塗布生產、IPQC、OQC、包裝與出貨
+    - 倉庫由製造部生管組管理，檢驗由品質保證部負責
+  must_not_reveal: []
+
+- id: Q053
+  type: answerable
+  asker_department: ADM
+  question: IQC、IPQC、OQC 差在哪裡？各由誰負責？
+  expected_docs: [QA-RULE-003]
+  acceptable_docs: [QA-TRN-001, MFG-TRN-003]
+  key_facts:
+    - IQC 進料檢驗、IPQC 製程巡檢、OQC 出貨檢驗
+    - 三者都由品質保證部負責，IPQC 由製造部配合取樣
+  must_not_reveal: []
+
+- id: Q054
+  type: answerable
+  asker_department: RD
+  question: 實驗室的設備壞了要找誰修？
+  expected_docs: [ADM-RULE-007]
+  key_facts:
+    - 設備故障找製程工程部設備課 楊文彬
+    - 量測儀器故障或校正找實驗室 簡志遠
+  must_not_reveal: []
+
+- id: Q055
+  type: answerable
+  asker_department: ADM
+  question: 常聽到現場說「母卷」，那是什麼意思？
+  expected_docs: [QA-TRN-001]
+  acceptable_docs: [MFG-TRN-003]
+  key_facts:
+    - 塗布線收卷完成的一整大卷產品
+    - 是追溯與檢驗的基本單位，每卷有唯一批號
+  must_not_reveal: []
+
+- id: Q056
+  type: answerable
+  asker_department: QA
+  question: 公司的品質政策是什麼？
+  expected_docs: [QA-RULE-003]
+  key_facts:
+    - 每一層都精準，每一卷都可追溯
+    - 三個重點：精準、可追溯、先保護客戶
+  must_not_reveal: []
+
+- id: Q057
+  type: multi_doc
+  asker_department: ADM
+  question: 塗液是哪個部門在調？配方是誰提供的？
+  expected_docs: [MFG-TRN-003, ADM-RULE-007]
+  key_facts:
+    - 塗液由製造部調配組調配（組長 何振宇）
+    - 依研發部提供的調配指示；配方資訊只在研發部內流通
+  must_not_reveal: []
+
+- id: Q058
+  type: answerable
+  asker_department: RD
+  question: 客戶打來抱怨品質，應該轉給誰處理？
+  expected_docs: [ADM-RULE-007]
+  acceptable_docs: [QA-RULE-001]
+  key_facts:
+    - 轉給品質保證部 品保工程師 洪詩涵
+    - 品質問題對外只有品質保證部一個窗口
   must_not_reveal: []

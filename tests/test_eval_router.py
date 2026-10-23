@@ -74,6 +74,43 @@ def test_unauthorized_counts_documents_selected_in_any_turn(seeded):
     assert row['passed'] and row['turns'][0]['dropped'] == ['RD-RULE-001']
 
 
+def test_followups_answer_earlier_turns_and_score_only_the_last_one(seeded):
+    from llm.client import LLM
+    from llm.guard import ConcurrencyGate, DailyBudget
+    from llm.pricing import Pricing
+    from llm.providers.fake import FakeProvider
+    from rag import index
+    from scripts.eval_router import evaluate_followups, item_ok, summarize
+    db, departments = seeded
+    first = next(c for c in index.get_index(db).chunks if c.doc_code == 'MFG-SOP-002')
+    with_state = json.loads(answer('MFG-SOP-003'))
+    with_state.update(state={'line': 'CL-02', 'topic': '塗布頭清潔'}, rewritten_queries=['CL-02 塗布頭 清潔'])
+    client, provider = make_client([clarify('line'), answer('MFG-SOP-002'), json.dumps(with_state),
+                                    answer('MFG-SOP-002', 'RD-RPT-001')])
+    answer_provider = FakeProvider([json.dumps({'status': 'answered', 'points': [
+        {'text': '依 SOP 清潔', 'citations': [first.chunk_id], 'condition': 'CL-01'}]}, ensure_ascii=False)])
+    answer_client = LLM(answer_provider, 'fake:answer', purpose='answer', pricing=Pricing({}),
+                        budget=DailyBudget(limit_usd=100), gate=ConcurrencyGate(limit=5))
+    items = [{'id': 'F1', 'asker_department': 'MFG', 'turns': ['塗布頭怎麼清潔？', '那 CL-02 呢？'],
+              'expected_docs': ['MFG-SOP-003'], 'must_not_clarify': True, 'must_not_carry': ['CL-01']},
+             {'id': 'F2', 'asker_department': 'MFG', 'turns': ['研發的配方分析呢？'], 'expected_docs': [],
+              'must_not_clarify': False, 'must_not_docs': ['RD-RPT-001']}]
+    rows = evaluate_followups(db, items, client, answer_client, departments)
+    # Earlier turn: clarify → 「不知道」 → answer; the answer's compact text is in the last turn's history.
+    assert '<question>不知道</question>' in provider.calls[1]['messages'][-1]['content']
+    last = provider.calls[2]['messages']
+    assert [m['content'] for m in last[-3:-1]] == ['不知道', '- （CL-01）依 SOP 清潔']
+    assert rows[0]['recall'] == 1 and rows[0]['clarified'] is False and rows[0]['carried'] == [] and item_ok(rows[0])
+    assert rows[1]['leaked'] == [] and rows[1]['turns'][-1]['dropped'] == ['RD-RPT-001'] and item_ok(rows[1])
+    assert summarize(rows)['followup_passed'] == 1.0 and summarize(rows)['followup_answer_budget_cost_usd'] > 0
+
+
+def test_carried_checks_state_values_and_queries():
+    from scripts.eval_router import carried
+    record = {'state': {'line': 'CL-02', 'topic': '訪客'}, 'queries': ['訪客 入廠 凹版輥']}
+    assert carried(record, ['CL-02', '凹版輥', 'HC-350']) == ['CL-02', '凹版輥']
+
+
 def test_budget_exhaustion_stops_the_run_instead_of_scoring_fallbacks(seeded, monkeypatch):
     from llm.guard import DailyBudget
     from scripts import eval_router

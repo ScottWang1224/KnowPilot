@@ -286,7 +286,9 @@ def evaluate(db, items, router_spec, answer_specs, judge_spec, *, budget=None):
                 if result.error == 'budget_exceeded':
                     raise BudgetExhausted()
                 entry = {'status': result.status, 'error': result.error, 'removed_citations': result.removed_citations,
-                         'dropped_points': result.dropped_points, 'usage': llm_usage(result.llm),
+                         'dropped_points': result.dropped_points, 'dropped_missing': result.dropped_missing,
+                         'condition_repeated': sum(map(answer_mod.condition_repeated, result.output.points)) if result.output else 0,
+                         'usage': llm_usage(result.llm),
                          'at_limit': any(t >= settings.answer_max_tokens() for t in (result.llm.attempt_output_tokens if result.llm else [])),
                          'response': {'structured': result.output.model_dump() if result.output else None,
                                       'text': format_answer(result.output)}}
@@ -370,6 +372,9 @@ def summarize(rows, spec):
         'route_safety_note': _rate(e['checks'].get('route_safety_note') for _, e in entries),
         'removed_citations': sum(len(e['removed_citations']) for _, e in entries),
         'dropped_points': sum(e['dropped_points'] for _, e in entries),
+        # Older result files predate these two counts.
+        'dropped_missing': sum(bool(e.get('dropped_missing')) for _, e in entries),
+        'condition_repeated': sum(e.get('condition_repeated', 0) for _, e in entries),
         'status': statuses,
         'avg_chunks': round(mean(len(row['retrieved_contexts']) for row, _ in entries), 1) if entries else None,
         'avg_answer_input_tokens': round(mean(u['input_tokens'] for u in answer_usage)) if answer_usage else None,
@@ -403,6 +408,8 @@ METRICS = [  # (key, label, kind)
     ('route_safety_note', '安全提示：路由追問', 'rate'),
     ('removed_citations', '伺服器端移除的引用', 'count'),
     ('dropped_points', '刪除的要點', 'count'),
+    ('dropped_missing', 'answered 卻帶 missing（伺服器端移除）', 'count'),
+    ('condition_repeated', '要點文字重複 condition', 'count'),
     ('avg_chunks', '平均段落數', 'num'),
     ('avg_answer_input_tokens', '回答平均 input token', 'num'),
     ('avg_answer_output_tokens', '回答平均 output token', 'num'),

@@ -38,6 +38,14 @@ def chat_max_input_chars():
     return _int('CHAT_MAX_INPUT_CHARS', 500)
 
 
+def chat_user_daily_budget_usd():
+    return _float('CHAT_USER_DAILY_BUDGET_USD', 0.05)
+
+
+def chat_default_cost_per_question_usd():
+    return _float('CHAT_DEFAULT_COST_PER_QUESTION_USD', 0.0025)
+
+
 def router_model():
     return os.getenv('LLM_ROUTER_MODEL', '')
 

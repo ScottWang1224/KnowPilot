@@ -1,0 +1,12 @@
+{% extends 'base.html' %}{% block title %}統計儀表板{% endblock %}{% block scripts %}<script src="/static/js/admin.js" defer></script>{% endblock %}{% block content %}<div class="page-heading admin-heading"><div><p class="eyebrow">ADMIN</p><h1>統計儀表板</h1><p class="muted" data-field="range"></p></div><nav class="admin-tabs" aria-label="後台頁面"><a href="/admin/dashboard" aria-current="page">統計儀表板</a><a href="/admin/users">使用者</a></nav></div>
+<div class="range-filter" role="group" aria-label="統計期間"><button type="button" data-days="7">最近 7 天</button><button type="button" data-days="14">最近 14 天</button><button type="button" data-days="30">最近 30 天</button></div>
+<section class="stat-grid" id="stat-grid" aria-label="重點數字"></section>
+<div class="dashboard-grid">
+<section class="panel admin-section"><h2>每日 LLM 花費</h2><p class="section-note">預算計入成本（USD），路由與回答分開。</p><div class="chart-legend"><span class="key key-router">路由</span><span class="key key-answer">回答</span></div><div class="column-chart" id="cost-chart"></div></section>
+<section class="panel admin-section"><h2>每日提問數</h2><p class="section-note">使用者送出的訊息數，含回覆追問。</p><div class="column-chart" id="question-chart"></div></section>
+<section class="panel admin-section"><h2>回饋：依部門</h2><div class="chart-legend"><span class="key key-up">有幫助</span><span class="key key-down">沒幫助</span></div><div class="bar-list" id="feedback-department"></div></section>
+<section class="panel admin-section"><h2>回饋：依回答狀態</h2><div class="chart-legend"><span class="key key-up">有幫助</span><span class="key key-down">沒幫助</span></div><div class="bar-list" id="feedback-status"></div></section>
+</div>
+<section class="panel admin-section"><h2>「沒幫助」的回答</h2><p class="section-note">最多列出 50 筆，點選可查看完整對話。</p><div id="down-list"></div></section>
+<section class="panel admin-section"><h2>用量最高的使用者</h2><div id="top-users"></div></section>
+<section class="panel admin-section"><h2>每日明細</h2><div id="daily-table"></div></section>{% endblock %}

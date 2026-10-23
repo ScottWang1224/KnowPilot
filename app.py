@@ -18,7 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from core.config import ROOT, Settings
 from core.database import Database
 from core.views import render
-from routers import admin, auth, portal
+from routers import admin, auth, chat, portal
 
 logger=logging.getLogger(__name__)
 FIELD_LABELS={'name':'名稱','email':'電子信箱','password':'密碼','department_id':'部門',
@@ -41,9 +41,12 @@ def create_app(settings=None,database=None):
     application.state.settings=settings
     application.state.db=database or Database.from_env()
     application.state.templates=Jinja2Templates(directory=str(ROOT/'templates'))
+    application.state.chat_clients=chat.default_clients
+    chat.warm_up()
     application.mount('/static',StaticFiles(directory=str(ROOT/'static')),name='static')
     application.include_router(auth.router)
     application.include_router(admin.router)
+    application.include_router(chat.router)
     application.include_router(portal.api)
     application.include_router(portal.pages)
     application.add_middleware(TrustedHostMiddleware,allowed_hosts=list(settings.allowed_hosts))

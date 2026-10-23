@@ -1,4 +1,4 @@
-"""One conversation turn: route, then answer. Shared by chat_cli, the answer evaluation and (phase 4) the chat API."""
+"""One conversation turn: route, then answer. Shared by chat_cli, the evaluation scripts and the chat API."""
 from dataclasses import dataclass, field
 
 from llm import settings
@@ -28,9 +28,26 @@ class TurnResult:
     answer: AnswerResult | None   # None while clarifying, or when no answer model is configured
 
 
-def run_turn(db, user, text, conv, *, router_client=None, answer_client=None, use_glossary=True):
+def history_text(turn):
+    """What the assistant turn leaves in history, or None when it stays out (errors, no answer)."""
+    if turn.route.action == 'clarify':
+        return clarify_text(turn.route.decision.clarify)
+    if turn.route.action == 'out_of_scope':
+        return answer.OUT_OF_SCOPE_TEXT
+    if turn.answer is None or turn.answer.output is None:
+        return None
+    return answer.compact_answer(turn.answer.output)
+
+
+def run_turn(db, user, text, conv, *, router_client=None, answer_client=None, use_glossary=True,
+             keep_history_after_answer=False):
     """Route `text` within `conv`. A clarifying question extends the conversation; anything else
-    is answered (when an answer model is available) and the conversation starts over."""
+    is answered (when an answer model is available).
+
+    After an answer the conversation starts over, unless keep_history_after_answer (the chat API):
+    then the exchange stays in history for follow-up questions and only state and clarify_turns
+    reset. A turn that ends in an error leaves the conversation as it was.
+    """
     route = router.route(db, user, text, history=conv.history, state=conv.state, clarify_turns=conv.clarify_turns,
                          client=router_client, use_glossary=use_glossary)
     if route.error == 'invalid_input':
@@ -44,5 +61,10 @@ def run_turn(db, user, text, conv, *, router_client=None, answer_client=None, us
     result = None
     if answer_client is not None or settings.answer_model():
         result = answer.answer(db, user, text, route, history=conv.history, client=answer_client)
-    conv.reset()
-    return TurnResult(route, result)
+    turn = TurnResult(route, result)
+    if not keep_history_after_answer:
+        conv.reset()
+    elif (reply := history_text(turn)) is not None:
+        conv.history += [{'role': 'user', 'content': text}, {'role': 'assistant', 'content': reply}]
+        conv.state, conv.clarify_turns = None, 0
+    return turn

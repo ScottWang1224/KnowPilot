@@ -44,6 +44,14 @@ def document(db,user,doc_id):
     return db.query(DOCUMENT_SELECT+' WHERE '+scope+' AND d.id=%s',params+(doc_id,),one=True)
 
 
+def published_document(db,doc_id):
+    """Admin pages only (require_admin): any published document, regardless of department.
+
+    Never used for listings, the RAG index or an admin's own chat, which all stay on document_scope().
+    """
+    return db.query(DOCUMENT_SELECT+" WHERE d.status='published' AND d.id=%s",(doc_id,),one=True)
+
+
 def document_categories(db,user):
     scope,params=document_scope(user)
     return [r['category'] for r in db.query('SELECT DISTINCT d.category FROM documents d WHERE '+scope+' ORDER BY d.category',params)]

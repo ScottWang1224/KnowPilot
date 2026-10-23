@@ -77,6 +77,14 @@ async function api(path, { method = 'GET', body, auth = true, redirect = auth } 
 const dateFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' });
 function taipeiDate(value) { return value ? dateFormat.format(new Date(value)).replaceAll('-', '.') : '—'; }
 
+// A text-only element; shared by the page scripts (assistant.js, admin.js).
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
 // Mirrors Jinja's truncate filter, which these lists used before.
 function truncate(text, length) {
   if (text.length <= length + 5) return text;
@@ -269,6 +277,8 @@ function userFields(user) {
 function renderUser(user) {
   document.querySelectorAll('[data-user]').forEach((node) => { fill(node, userFields(user)); node.hidden = false; });
   document.querySelectorAll('[data-logout]').forEach((node) => { node.hidden = false; });
+  // Only a shortcut: every /api/admin/* call is still checked by require_admin.
+  document.querySelectorAll('[data-admin-link]').forEach((node) => { node.hidden = user.role !== 'admin'; });
 }
 
 function documentFields(doc) {
@@ -282,7 +292,22 @@ async function loadDepartments(select, selected) {
   for (const department of data) select.append(new Option(department.name, department.id, false, department.id === selected));
 }
 
-/* Pages */
+/* Citation links open /documents/{id}?section=<heading>: compare headings with whitespace removed after NFKC,
+   the same normalisation the router uses, so no slug rules are needed on either side. */
+function sectionKey(text) { return text.normalize('NFKC').replace(/\s+/g, ''); }
+
+function jumpToSection(article, section) {
+  if (!section) return;
+  const wanted = sectionKey(section);
+  const heading = [...article.querySelectorAll('.markdown h2, .markdown h3')].find((node) => sectionKey(node.textContent) === wanted);
+  if (!heading) return;
+  heading.tabIndex = -1;
+  heading.classList.add('section-flash');
+  // aria-busy hides the page until loading ends, so scroll on the next frame.
+  requestAnimationFrame(() => { heading.scrollIntoView({ block: 'start' }); heading.focus({ preventScroll: true }); });
+}
+
+/* Pages; page scripts such as assistant.js add theirs to window.KP_PAGES before app.js runs. */
 const PAGES = {
   async index(user) {
     const [announcements, documents] = await Promise.all([api('/api/announcements'), api('/api/documents')]);
@@ -339,9 +364,8 @@ const PAGES = {
     document.title = doc.title + ' · KnowPilot';
     fill(article, { ...documentFields(doc), version: '版本 ' + doc.version });
     fillMarkdown(article, { content: doc.content });
+    jumpToSection(article, new URLSearchParams(location.search).get('section'));
   },
-
-  async assistant() {},
 
   async profile(user) {
     const main = document.getElementById('main-content');
@@ -420,7 +444,7 @@ async function initRegister() {
 
 async function initPortal(name) {
   const main = document.getElementById('main-content');
-  const load = PAGES[name];
+  const load = PAGES[name] || (window.KP_PAGES || {})[name];
   if (!load) {
     main.removeAttribute('aria-busy');  // Server-rendered pages such as error.html.
     return;

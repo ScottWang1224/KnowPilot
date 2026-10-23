@@ -28,11 +28,12 @@ def change_department(db,user_id,department_id):
 
     Returns the number of conversations hidden.
     """
+    now=datetime.now(timezone.utc).replace(tzinfo=None,microsecond=0)
     with db.transaction() as cursor:
         cursor.execute('UPDATE users SET department_id=%s WHERE id=%s',(department_id,user_id))
-        # TODO(chat): when conversations exist, in this same transaction:
-        # UPDATE conversations SET hidden_at=<now> WHERE user_id=%s AND hidden_at IS NULL
-        return 0
+        cursor.execute("UPDATE conversations SET hidden_at=%s,hidden_reason='department_change' "
+                       'WHERE user_id=%s AND hidden_at IS NULL',(now,user_id))
+        return cursor.rowcount
 
 
 def all_users(db):

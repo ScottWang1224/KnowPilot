@@ -9,7 +9,8 @@ given, so results do not depend on the local development database. Each question
 asker is an in-memory user whose access still goes through document_scope() in SQL.
 
 --router-model provider:model [provider:model ...] also evaluates the LLM router on the
-same question sets plus data/eval/scenarios.yaml, one model after another, and prints
+same question sets plus data/eval/scenarios.yaml and data/eval/followups.yaml (whose earlier
+turns are answered by LLM_ANSWER_MODEL, as in the chat API), one model after another, and prints
 the models side by side (see scripts/eval_router.py). This calls the real APIs and is
 charged; the estimated cost is printed first and --estimate-only stops there.
 
@@ -40,6 +41,7 @@ SEARCH_CHUNKS = 30  # at most 3 chunks per document, so 30 chunks always yield 1
 QUESTION_SETS = ('questions.yaml', 'paraphrase.yaml')
 SCENARIOS = ROOT/'data'/'eval'/'scenarios.yaml'
 ADVERSARIAL = ROOT/'data'/'eval'/'adversarial.yaml'
+FOLLOWUPS = ROOT/'data'/'eval'/'followups.yaml'
 
 
 def ranked_docs(hits):
@@ -133,16 +135,23 @@ def print_report(summary, results):
         print(f'  {r["id"]} {r["question"]}\n      預期 {r["expected"]}\n      取得 {r["retrieved"][:6]}')
 
 
-def print_estimate(specs, question_sets, scenarios, args):
+def print_estimate(specs, question_sets, scenarios, args, followups=(), answer_spec=None):
     n_questions = sum(len(q) for q in question_sets.values())
     n_glossary = len(question_sets.get('paraphrase.yaml', [])) if args.no_glossary else 0
-    calls, costs = eval_router.estimate_cost(Pricing(), specs, n_questions, len(scenarios), args.repeat, n_glossary)
+    n_turns = sum(len(f['turns']) for f in followups)
+    calls, costs = eval_router.estimate_cost(Pricing(), specs, n_questions, len(scenarios), args.repeat, n_glossary, n_turns)
     budget = f'${args.budget_usd}（--budget-usd）' if args.budget_usd is not None else '.env 的 LLM_DAILY_BUDGET_USD'
     print(f'路由評測預估：每個模型約 {calls:.0f} 次呼叫（題目 {n_questions}、情境 {len(scenarios)}、'
           f'術語表對照 {n_glossary}，×{args.repeat} 次），以每次 {eval_router.EST_INPUT_TOKENS:,} input／'
           f'{eval_router.EST_OUTPUT_TOKENS} output token 估算（偏高）；預算上限 {budget}')
     for spec, (actual, charged) in costs.items():
         print(f'  {spec}：實際 {"無價格資料" if actual is None else f"${actual:.3f}"}，預算計入 ${charged:.3f}')
+    if followups:
+        n_answers = sum(len(f['turns']) - 1 for f in followups) * len(specs) * args.repeat
+        _, answer_costs = eval_router.estimate_cost(Pricing(), [answer_spec], n_answers, 0, 1, 0)
+        actual, charged = answer_costs[answer_spec]
+        print(f'  延伸題 {len(followups)} 組：前句回答約 {n_answers * eval_router.EST_CALLS_PER_QUESTION:.0f} 次 {answer_spec} 呼叫，'
+              f'實際 {"無價格資料" if actual is None else f"${actual:.3f}"}，預算計入 ${charged:.3f}')
 
 
 def load_yaml(path):
@@ -209,7 +218,11 @@ def main():
     if args.router_model:
         load_dotenv(ROOT/'.env')  # API keys and LLM limits; the database stays the temporary one
         scenarios = yaml.safe_load(SCENARIOS.read_text(encoding='utf-8')) or [] if SCENARIOS.exists() else []
-        print_estimate(args.router_model, question_sets, scenarios, args)
+        followups, answer_spec = load_yaml(FOLLOWUPS), settings.answer_model()
+        if followups and not answer_spec:
+            print('未設定 LLM_ANSWER_MODEL，略過 followups.yaml（前句需要實際回答）')
+            followups = []
+        print_estimate(args.router_model, question_sets, scenarios, args, followups, answer_spec)
         if args.estimate_only:
             return 0
     router_report = None
@@ -226,7 +239,8 @@ def main():
             baselines = {name: {r['id']: r for r in run['results']} for name, run in runs.items()}
             budget = DailyBudget(limit_usd=args.budget_usd) if args.budget_usd is not None else None
             router_report = eval_router.run_models(db, args.router_model, question_sets, scenarios, baselines,
-                                                   repeat=args.repeat, budget=budget, no_glossary=args.no_glossary)
+                                                   repeat=args.repeat, budget=budget, no_glossary=args.no_glossary,
+                                                   followups=followups, answer_spec=answer_spec)
     if router_report:
         eval_router.print_report(router_report)
     out = ROOT/'.eval-runs'
@@ -240,7 +254,8 @@ def main():
     for runs_of_model in (router_report or {}).get('models', {}).values():
         for run in runs_of_model:
             for result in run.values():
-                rates = (result['summary']['unauthorized_pass'], result['summary']['scenario_must_not_pass'])
+                rates = (result['summary']['unauthorized_pass'], result['summary']['scenario_must_not_pass'],
+                         result['summary']['followup_must_not_pass'])
                 leaked |= any(rate is not None and rate < 1 for rate in rates)
     return 1 if leaked else 0
 

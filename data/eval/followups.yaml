@@ -1,0 +1,87 @@
+# KnowPilot 延伸問題評測（階段 4 規格 6.3）。驗證「回答後同一段對話接著問」時路由的判斷。
+#
+# 模擬方式：依序送出 turns。最後一句之前的每一句都實際經過路由與回答模型，
+# 回答以精簡文字存進歷史（與聊天 API 相同的歷史組成）；中途被追問時一律回「不知道」。
+# 只評分最後一句：第一輪的 action、最終段落的文件、state 與查詢改寫。
+#
+# 欄位：
+#   id / asker_department / turns     編號、提問部門、依序送出的句子（最後一句是評分對象）
+#   expected_docs                     最後一句的最終段落應涵蓋的文件（可為空，表示只檢查權限或沿用）
+#   must_not_clarify                  最後一句第一輪不應追問（條件可從歷史得知）
+#   以下為選填：
+#   acceptable_docs                   答案同樣成立的其他文件，只列入報告
+#   must_not_carry                    換主題時不得沿用的舊條件：最後一句第一輪的 state 值與 rewritten_queries 都不得包含
+#   must_not_docs                     提問部門看不到的文件；任一句任一輪的 selected 與最終段落都不得出現（必須 100%）
+#   note                              給審閱者的說明，不參與計分
+#
+# 文件依據：expected_docs 都已確認提問部門可見；must_not_docs 都已確認提問部門不可見。
+
+# ---------- 延伸問題：換條件 ----------
+- id: F01
+  asker_department: MFG
+  turns:
+    - CL-01 的塗布頭要怎麼清潔？
+    - 那 CL-02 呢？
+  expected_docs: [MFG-SOP-003]
+  must_not_clarify: true
+  note: 換產線。主題（塗布頭清潔）沿用，CL-01 換成 CL-02；MFG-SOP-002 是 CL-01、MFG-SOP-003 是 CL-02
+
+- id: F02
+  asker_department: QA
+  turns:
+    - 正職員工的陪產假有幾天？
+    - 約聘的呢？
+  expected_docs: [ADM-RULE-003]
+  must_not_clarify: true
+  note: 換聘用類別。ADM-RULE-003 第 46 行表格：陪產檢及陪產假 7 天，正職與約聘都適用
+
+- id: F03
+  asker_department: PE
+  turns:
+    - HC-200 的塗布線速設定範圍是多少？
+    - 那 HC-350 呢？
+  expected_docs: [PE-SPEC-002]
+  must_not_clarify: true
+  note: 換產品。PE-SPEC-001 是 HC-200（20 m/min，18～22）、PE-SPEC-002 是 HC-350（15 m/min，14～16）
+
+# ---------- 換到無關的新主題 ----------
+- id: F04
+  asker_department: MFG
+  turns:
+    - CL-02 換線時凹版輥要怎麼拆？
+    - 訪客入廠要辦什麼手續？
+  expected_docs: [ADM-SOP-005]
+  must_not_clarify: false
+  must_not_carry: [CL-02, 凹版輥]
+  note: 新主題與產線無關，不得把 CL-02 或凹版輥帶進 state 或查詢
+
+- id: F05
+  asker_department: QA
+  turns:
+    - HC-350 異物客訴的 8D 根本原因是什麼？
+    - 出差的住宿費上限是多少？
+  expected_docs: [ADM-RULE-005]
+  must_not_clarify: false
+  must_not_carry: [HC-350, 異物, CC-2026-005]
+  note: 新主題。ADM-RULE-005 依國內／國外可能追問，所以不檢查追問；只檢查不沿用 HC-350 客訴的條件
+
+# ---------- 延伸到看不到的文件 ----------
+- id: F06
+  asker_department: MFG
+  turns:
+    - D01 條紋在 CL-01 要怎麼初步處置？
+    - 那研發對 D01 的配方因素分析是怎麼說的？
+  expected_docs: []
+  must_not_clarify: false
+  must_not_docs: [RD-RPT-001, PE-SPEC-005]
+  note: 權限。RD-RPT-001（研發）與 PE-SPEC-005（製程工程）都是 MFG 看不到的 D01 文件；可以回答找不到或只用 MFG 可見文件
+
+# ---------- 延伸到相關的下一步 ----------
+- id: F07
+  asker_department: QA
+  turns:
+    - 出差住宿費上限是多少？
+    - 那回來之後要填哪張單？
+  expected_docs: [ADM-FORM-002]
+  must_not_clarify: false
+  note: 同一主題（出差）的下一步。ADM-RULE-005 是規則，ADM-FORM-002 是出差申請與報支單填寫說明；只看 recall

@@ -27,7 +27,9 @@
    - 段落能回答一部分：`status` 為 `partial`，回答有依據的部分，並在 `missing` 說明文件中找不到的部分。
    - 段落完全無法回答：`status` 為 `not_found`，`points` 留空，`missing` 簡短說明缺少什麼。
    - 不得猜測、推論或補上段落沒有寫的內容。
-4. **多種可能**：`<multiple_possibilities>` 為 true，或段落中的答案依條件（產線、產品、班別、聘用類別等）不同時，依條件分別列出，每個要點的 `condition` 填它適用的條件。條件相同的內容不必重複。
+   - `missing` 只能用一句話說明「文件沒有提到什麼」，**不得寫出任何事實**（數值、日期、期限、名稱、分機或聯絡方式都不行）。`status` 為 `answered` 時，`missing` 必須是 `null`。
+   - 想補充的資訊（例如相關公告、注意事項）一律寫成有引用的要點，不要放進 `missing`。
+4. **多種可能**：`<multiple_possibilities>` 為 true，或段落中的答案依條件（產線、產品、班別、聘用類別等）不同時，依條件分別列出，每個要點的 `condition` 填它適用的條件。條件相同的內容不必重複。`condition` 已經寫出的條件，不要在 `text` 開頭再寫一次。
 5. **安全優先**：問題涉及異常、停線、化學品或人身安全時，在 `safety_note` 寫出段落中寫明的立即動作（例如停線、隔離、通報對象與時限），並附引用。段落沒有寫到時 `safety_note` 為 `null`，不得自己編寫。與安全無關的問題一律為 `null`。
 6. **格式**：繁體中文；`points` 為條列要點，每個要點一到兩句話，最重要的先寫，最多 8 個。不要寫開場白、結語或重複問題。
 
@@ -40,7 +42,7 @@
 `<multiple_possibilities>` 為 true，段落 `XX-SOP-001#2` 寫甲線每 500 小時更換、`XX-SOP-002#3` 寫乙線每 800 小時更換。
 
 ```json
-{"status": "answered", "safety_note": null, "points": [{"text": "甲線每 500 小時更換一次。", "citations": ["XX-SOP-001#2"], "condition": "甲線"}, {"text": "乙線每 800 小時更換一次。", "citations": ["XX-SOP-002#3"], "condition": "乙線"}], "missing": null}
+{"status": "answered", "safety_note": null, "points": [{"text": "每 500 小時更換一次。", "citations": ["XX-SOP-001#2"], "condition": "甲線"}, {"text": "每 800 小時更換一次。", "citations": ["XX-SOP-002#3"], "condition": "乙線"}], "missing": null}
 ```
 
 **範例 2：只有部分依據，並有安全動作**

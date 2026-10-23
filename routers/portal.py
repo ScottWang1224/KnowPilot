@@ -9,12 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from core.dependencies import get_current_user
 from core.views import render, utc_iso
+from llm import settings as llm_settings
 from repositories import content
 
 pages=APIRouter()
 api=APIRouter(prefix='/api',dependencies=[Depends(get_current_user)])
 PAGE_SIZE=12
-PAGE_LABELS={'dashboard':'工作總覽','announcement':'公司公告','document':'文件中心','assistant':'AI 助理','profile':'個人資料'}
+PAGE_LABELS={'dashboard':'工作總覽','announcement':'公司公告','document':'文件中心','assistant':'AI 助理','profile':'個人資料','admin':'後台'}
 
 
 def page(request,name,active,**context):
@@ -48,12 +49,34 @@ def document_page(request:Request,doc_id:Annotated[int,Path(ge=1)]):
 
 @pages.get('/assistant')
 def assistant_page(request:Request):
-    return page(request,'assistant.html','assistant')
+    # The input limit is shown in the page; the chat API enforces it again.
+    return page(request,'assistant.html','assistant',max_chars=llm_settings.chat_max_input_chars())
 
 
 @pages.get('/profile')
 def profile_page(request:Request):
     return page(request,'profile.html','profile')
+
+
+# Admin page shells: like every page they carry no data; /api/admin/* (require_admin) decides who sees anything.
+@pages.get('/admin/dashboard')
+def admin_dashboard_page(request:Request):
+    return page(request,'admin_dashboard.html','admin')
+
+
+@pages.get('/admin/users')
+def admin_users_page(request:Request):
+    return page(request,'admin_users.html','admin')
+
+
+@pages.get('/admin/users/{user_id}')
+def admin_user_page(request:Request,user_id:Annotated[int,Path(ge=1)]):
+    return page(request,'admin_user.html','admin',user_id=user_id)
+
+
+@pages.get('/admin/documents/{doc_id}')
+def admin_document_page(request:Request,doc_id:Annotated[int,Path(ge=1)]):
+    return page(request,'admin_document.html','admin',doc_id=doc_id)
 
 
 @pages.get('/login')

@@ -227,10 +227,12 @@ def test_content_apis_require_login_and_hide_unpublished(portal):
 
 def test_pages_are_data_free_shells(portal):
     client, _, _ = portal
-    for path in ['/', '/documents', '/documents/3', '/announcements', '/announcements/2', '/assistant', '/profile', '/login', '/register']:
+    for path in ['/', '/documents', '/documents/3', '/announcements', '/announcements/2', '/assistant', '/profile', '/login', '/register',
+                 '/admin/dashboard', '/admin/users', '/admin/users/2', '/admin/documents/3']:
         page = client.get(path)
         assert page.status_code == 200
         assert '研發機密內容' not in page.text and '草稿公告內容' not in page.text
+        assert 'r001@example.com' not in page.text  # admin shells carry no user data either
     assert client.get('/documents/-1').status_code == 422
     assert client.get('/missing').status_code == 404
 

@@ -39,7 +39,8 @@ def extract_json(text):
 class LLM:
     """An LLMClient for one 'provider:model-id' spec and one purpose (router / answer)."""
 
-    def __init__(self, provider, spec, *, purpose, pricing=None, budget=None, gate=None):
+    def __init__(self, provider, spec, *, purpose, pricing=None, budget=None, gate=None, recorder=None):
+        """recorder(result, purpose), when given, runs after every call, failed ones included."""
         self.provider = provider
         self.spec = spec
         self.model = spec.split(':', 1)[1]
@@ -47,6 +48,7 @@ class LLM:
         self.pricing = pricing or Pricing()
         self.budget = budget or guard.default_budget()
         self.gate = gate or guard.default_gate()
+        self.recorder = recorder
 
     def complete_json(self, *, system, messages, schema, max_tokens, prompt_name=None, prompt_hash=None):
         """prompt_name/prompt_hash identify the prompt file version when system also carries per-user data."""
@@ -120,6 +122,12 @@ class LLM:
                              'cost_usd': result.cost_usd, 'budget_cost_usd': round(result.budget_cost_usd, 6),
                              'attempts': result.attempts, 'validation_failed': result.validation_failed,
                              'error': result.error, 'error_detail': result.error_detail}, ensure_ascii=False))
+        if self.recorder is not None:
+            try:
+                self.recorder(result, self.purpose)
+            except Exception:
+                # A lost record must never fail the user's request.
+                log.exception('llm call recorder failed')
         return result
 
 

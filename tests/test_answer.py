@@ -58,6 +58,27 @@ def test_citations_outside_the_sources_are_removed_and_uncited_points_dropped():
     assert '<multiple_possibilities>false</multiple_possibilities>' in sent
 
 
+def test_missing_is_dropped_from_answered_outputs_but_kept_for_partial_and_not_found():
+    from rag.answer import answer
+    client, _ = make_client([reply(points=[['MFG-SOP-001#1']], missing='新版指南已於 10/14 生效，請洽分機 102'),
+                             reply(status='partial', points=[['MFG-SOP-001#1']], missing='文件沒有寫到復機條件。'),
+                             reply(status='partial', points=[['X-SOP-009#1']], missing='文件沒有寫到復機條件。')])
+    complete = answer(None, None, 'q', route(), client=client)
+    assert complete.status == 'answered' and complete.output.missing is None and complete.dropped_missing
+    partial = answer(None, None, 'q', route(), client=client)
+    assert partial.output.missing == '文件沒有寫到復機條件。' and not partial.dropped_missing
+    emptied = answer(None, None, 'q', route(), client=client)  # every point dropped: not_found keeps its explanation
+    assert emptied.status == 'not_found' and emptied.output.missing == '文件沒有寫到復機條件。'
+
+
+def test_condition_repeated_detects_a_condition_written_twice():
+    from rag.answer import Point, condition_repeated
+    assert condition_repeated(Point(text='CL-01 清潔分為兩種', citations=['A#1'], condition='CL-01'))
+    assert condition_repeated(Point(text='（正職）7 天', citations=['A#1'], condition='正職'))
+    assert not condition_repeated(Point(text='清潔分為兩種', citations=['A#1'], condition='CL-01'))
+    assert not condition_repeated(Point(text='CL-01 清潔', citations=['A#1'], condition=None))
+
+
 def test_all_points_dropped_becomes_not_found_and_valid_safety_note_is_kept():
     from rag.answer import answer
     client, _ = make_client([reply(points=[['X-SOP-009#1']]), reply(points=[['MFG-SOP-001#2']], safety=['MFG-SOP-001#1'])])

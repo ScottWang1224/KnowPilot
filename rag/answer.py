@@ -3,6 +3,7 @@
 Only chunks already filtered by the user's access reach this step. Every point must cite
 the chunk_ids it was given; citations to anything else are removed on the server, and a
 point left without citations is dropped, so no unsupported statement reaches the user.
+`missing` carries no citations, so it is dropped whenever the answer is complete.
 """
 import hashlib
 import json
@@ -20,6 +21,7 @@ from llm.client import create_client
 log = logging.getLogger('knowpilot.rag')
 PROMPT_FILE = ROOT/'prompts'/'answer.md'
 MAX_POINTS = 8
+COMPACT_CHARS = 600
 NOT_FOUND_TEXT = '目前可查閱的文件中找不到這個問題的答案。'
 OUT_OF_SCOPE_TEXT = '目前可查閱的文件中沒有這方面的資料。'
 
@@ -60,6 +62,7 @@ class AnswerResult:
     error: str | None = None             # budget_exceeded | busy | validation_failed | provider_error
     removed_citations: list[str] = field(default_factory=list)
     dropped_points: int = 0
+    dropped_missing: bool = False        # an answered output carried `missing`, which was removed
     llm: LLMResult | None = None
 
 
@@ -80,7 +83,11 @@ def build_user_message(question, route):
 
 
 def verify(output, allowed):
-    """Keep only citations to chunks that were sent. Returns (output, removed citations, dropped points)."""
+    """Keep only citations to chunks that were sent. Returns (output, removed citations, dropped points).
+
+    `missing` is uncited free text: it may only say what the documents lack (partial / not_found),
+    so on an answered output it is removed rather than shown without any check.
+    """
     removed = []
 
     def keep(citations):
@@ -100,7 +107,9 @@ def verify(output, allowed):
     status = output.status
     if status != 'not_found' and not points:
         status = 'not_found'
-    return output.model_copy(update={'status': status, 'points': points[:MAX_POINTS], 'safety_note': safety}), removed, dropped
+    missing = None if status == 'answered' else output.missing
+    return (output.model_copy(update={'status': status, 'points': points[:MAX_POINTS], 'safety_note': safety, 'missing': missing}),
+            removed, dropped)
 
 
 def answer(db, user, question, route, *, history=(), client=None):
@@ -127,16 +136,35 @@ def answer(db, user, question, route, *, history=(), client=None):
     output, removed, dropped = verify(result.data, {hit.chunk_id for hit in route.chunks})
     if removed:
         log.warning('answer removed citations outside the sources: %s', ','.join(removed))
-    return _logged(AnswerResult(output, output.status, removed_citations=removed, dropped_points=dropped, llm=result), route)
+    dropped_missing = result.data.missing is not None and output.missing is None
+    if dropped_missing:
+        log.warning('answer removed `missing` from an answered output')
+    return _logged(AnswerResult(output, output.status, removed_citations=removed, dropped_points=dropped,
+                                dropped_missing=dropped_missing, llm=result), route)
 
 
 def _logged(result, route):
     # Never log the question, chunks or answer text.
     log.info(json.dumps({'answer_status': result.status, 'error': result.error,
                          'removed_citations': result.removed_citations, 'dropped_points': result.dropped_points,
+                         'dropped_missing': result.dropped_missing,
                          'chunks': len(route.chunks), 'points': len(result.output.points) if result.output else 0},
                         ensure_ascii=False))
     return result
+
+
+def condition_repeated(point):
+    """The point's text starts with its own condition (shown twice once the condition becomes a tag)."""
+    return bool(point.condition) and point.text.lstrip('（( ').startswith(point.condition.strip())
+
+
+def compact_answer(output, limit=COMPACT_CHARS):
+    """The answer kept in conversation history: safety note and points (with conditions), no citations."""
+    if output.status == 'not_found':
+        return NOT_FOUND_TEXT
+    lines = [f'【安全提示】{output.safety_note.text}'] if output.safety_note else []
+    lines += [f'- {f"（{p.condition}）" if p.condition else ""}{p.text}' for p in output.points]
+    return '\n'.join(lines)[:limit]
 
 
 def format_answer(output):

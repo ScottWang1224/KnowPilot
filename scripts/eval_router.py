@@ -34,7 +34,7 @@ def turn_record(text, result):
             'dimension': d.clarify.dimension if d and d.clarify else None,
             'options': d.clarify.options if d and d.clarify else None,
             'safety_note': (d.clarify.safety_note or None) if d and d.clarify else None,
-            'queries': d.rewritten_queries if d else [], 'selected': [s.doc_code for s in d.selected] if d else [],
+            'state': d.state if d else {}, 'queries': d.rewritten_queries if d else [], 'selected': [s.doc_code for s in d.selected] if d else [],
             'multiple_possibilities': bool(d and d.multiple_possibilities), 'dropped': result.dropped_docs,
             'chunks': [h.chunk_id for h in result.chunks],
             'llm': None if llm is None else {
@@ -43,9 +43,11 @@ def turn_record(text, result):
                 'validation_failed': llm.validation_failed, 'error_detail': llm.error_detail}}
 
 
-def run_dialogue(db, user, opening, client, reply_for, *, use_glossary=True):
-    """Route the opening and answer each clarifying question. Returns (turn records, final RouteResult)."""
-    history, state, turns, text = [], None, 0, opening
+def run_dialogue(db, user, opening, client, reply_for, *, use_glossary=True, history=None):
+    """Route the opening and answer each clarifying question. Returns (turn records, final RouteResult).
+
+    history: earlier answered exchanges (follow-up questions); state and clarify turns start empty."""
+    history, state, turns, text = list(history or []), None, 0, opening
     records = []
     while True:
         result = router.route(db, user, text, history=history, state=state, clarify_turns=turns,
@@ -128,9 +130,57 @@ def evaluate_scenarios(db, scenarios, client, departments):
     return rows
 
 
+def carried(record, forbidden):
+    """Old conditions found in a router turn's state values or rewritten queries."""
+    text = ' '.join([*map(str, (record['state'] or {}).values()), *record['queries']])
+    return [word for word in forbidden if word in text]
+
+
+def evaluate_followups(db, items, client, answer_client, departments):
+    """Earlier turns go through the chat pipeline (router + real answer, history kept like the chat API);
+    the last turn is routed as a dialogue that replies 「不知道」 and is the one scored."""
+    from rag.pipeline import Conversation, run_turn
+    rows = []
+    for item in items:
+        user = {'id': 0, 'department_id': departments[item['asker_department']]}
+        conv, earlier, answer_calls = Conversation(), [], []
+        for text in item['turns'][:-1]:
+            for _ in range(MAX_FOLLOWUPS + 1):
+                turn = run_turn(db, user, text, conv, router_client=client, answer_client=answer_client,
+                                keep_history_after_answer=True)
+                earlier.append(turn_record(text, turn.route))
+                if turn.route.error == 'budget_exceeded' or (turn.answer and turn.answer.error == 'budget_exceeded'):
+                    raise BudgetExhausted()
+                if turn.answer and turn.answer.llm:
+                    answer_calls.append(turn.answer.llm)
+                if turn.route.action != 'clarify':
+                    break
+                text = UNKNOWN
+        records, final = run_dialogue(db, user, item['turns'][-1], client, lambda _: UNKNOWN, history=conv.history)
+        docs = unique_docs(final.chunks)
+        expected = item.get('expected_docs') or []
+        row = {'id': item['id'], 'type': 'followup', 'asker': item['asker_department'], 'question': ' → '.join(item['turns']),
+               'expected': expected, 'acceptable': item.get('acceptable_docs') or [], 'final_action': final.action,
+               'final_docs': docs, 'first_action': records[0]['action'], 'turns': earlier + records,
+               'scored_turns': len(records), 'history': conv.history, 'usage': item_usage(earlier + records),
+               'answer_budget_cost_usd': round(sum(c.budget_cost_usd for c in answer_calls), 6),
+               'leaked': sorted((seen_docs(records + earlier, docs)) & set(item.get('must_not_docs') or []))}
+        if expected:
+            row['recall'] = len(set(docs) & set(expected)) / len(expected)
+        if item.get('must_not_clarify'):
+            row['clarified'] = records[0]['action'] == 'clarify'
+        if item.get('must_not_carry'):
+            row['carried'] = carried(records[0], item['must_not_carry'])
+        rows.append(row)
+    return rows
+
+
 def item_ok(row):
     """One pass/fail per item, used to compare models question by question."""
     kind = row['type']
+    if kind == 'followup':
+        return (row.get('recall', 1) == 1 and not row.get('clarified') and not row.get('carried')
+                and not row['leaked'])
     if kind == 'unauthorized':
         return row['passed']
     if kind == 'unanswerable':
@@ -169,6 +219,13 @@ def summarize(rows):
         'scenario_must_not_pass': _rate(not r['leaked'] for r in by('scenario')),
         'safety_note': _rate(r['safety_note'] for r in by('scenario') if 'safety_note' in r),
         'multiple_possibilities': _rate(r['multiple_possibilities'] for r in by('scenario') if 'multiple_possibilities' in r),
+        'followup_recall': _rate(r['recall'] for r in by('followup') if 'recall' in r),
+        'followup_no_clarify': _rate(not r['clarified'] for r in by('followup') if 'clarified' in r),
+        'followup_no_carry': _rate(not r['carried'] for r in by('followup') if 'carried' in r),
+        'followup_must_not_pass': _rate(not r['leaked'] for r in by('followup')),
+        'followup_passed': _rate(item_ok(r) for r in by('followup')),
+        'followup_answer_budget_cost_usd': round(sum(r['answer_budget_cost_usd'] for r in by('followup')), 6)
+        if by('followup') else None,
         'items': len(rows), 'calls': len(calls),
         'fallbacks': sum(bool(t['fallback']) for r in rows for t in r['turns']),
         'validation_failed_calls': sum(c['validation_failed'] for c in calls),
@@ -187,10 +244,12 @@ def summarize(rows):
     return s
 
 
-def estimate_cost(pricing, specs, n_questions, n_scenarios, repeat, n_glossary_questions):
-    """(estimated calls per model, {spec: (actual or None, budget)}) — a rough upper bound shown before running."""
+def estimate_cost(pricing, specs, n_questions, n_scenarios, repeat, n_glossary_questions, n_followup_turns=0):
+    """(estimated calls per model, {spec: (actual or None, budget)}) — a rough upper bound shown before running.
+
+    Follow-up turns are counted as router calls; the earlier turns' answers are estimated separately."""
     calls = (n_questions * EST_CALLS_PER_QUESTION + n_scenarios * EST_CALLS_PER_SCENARIO
-             + n_glossary_questions * EST_CALLS_PER_QUESTION) * repeat
+             + n_glossary_questions * EST_CALLS_PER_QUESTION + n_followup_turns * EST_CALLS_PER_QUESTION) * repeat
     tokens_in, tokens_out = calls * EST_INPUT_TOKENS, calls * EST_OUTPUT_TOKENS
     return calls, {spec: (pricing.actual_cost(spec, tokens_in, tokens_out), pricing.budget_cost(spec, tokens_in, tokens_out))
                    for spec in specs}
@@ -212,6 +271,12 @@ SET_METRICS = [  # (summary key, label, kind) kind: rate | count | tokens | ms |
     ('scenario_must_not_pass', '情境權限檢查 must_not_docs（必須 100%）', 'rate'),
     ('safety_note', '安全提示（expect_safety_note 的情境）', 'rate'),
     ('multiple_possibilities', '全程不知道時以多種可能回答', 'rate'),
+    ('followup_recall', '延伸題 Recall（最後一句的 expected_docs）', 'rate'),
+    ('followup_no_clarify', '延伸題未多餘追問（must_not_clarify）', 'rate'),
+    ('followup_no_carry', '換主題未沿用舊條件（must_not_carry）', 'rate'),
+    ('followup_must_not_pass', '延伸題權限檢查 must_not_docs（必須 100%）', 'rate'),
+    ('followup_passed', '延伸題全部條件通過的比例', 'rate'),
+    ('followup_answer_budget_cost_usd', '延伸題前句回答的預算計入成本', 'usd'),
     ('calls', 'LLM 呼叫次數', 'count'),
     ('fallbacks', '保底（LLM 失敗改用 BM25）次數', 'count'),
     ('validation_failed_calls', 'JSON 驗證失敗的呼叫', 'count'),
@@ -229,11 +294,16 @@ SET_METRICS = [  # (summary key, label, kind) kind: rate | count | tokens | ms |
 NO_GLOSSARY = 'paraphrase.yaml（無術語表）'
 
 
-def run_models(db, specs, question_sets, scenarios, baselines, *, repeat=1, budget=None, no_glossary=False):
-    """Run every model `repeat` times over all question sets and scenarios. Stops cleanly when the budget runs out."""
+def run_models(db, specs, question_sets, scenarios, baselines, *, repeat=1, budget=None, no_glossary=False,
+               followups=(), answer_spec=None):
+    """Run every model `repeat` times over all question sets and scenarios. Stops cleanly when the budget runs out.
+
+    followups are run only with answer_spec, which answers their earlier turns for every router model."""
     departments = {r['code']: r['id'] for r in db.query('SELECT id,code FROM departments')}
     report = {'prompt_name': router.PROMPT_FILE.name, 'prompt_hash': router.prompt_version()[1],
-              'router_max_tokens': settings.router_max_tokens(), 'repeat': repeat, 'aborted': None, 'models': {}}
+              'router_max_tokens': settings.router_max_tokens(), 'repeat': repeat, 'aborted': None, 'models': {},
+              'followup_answer_model': answer_spec if followups else None}
+    answer_client = create_client(answer_spec, purpose='answer', budget=budget) if followups and answer_spec else None
     for spec in specs:
         client = create_client(spec, purpose='router', budget=budget)
         runs = report['models'][spec] = []
@@ -247,6 +317,9 @@ def run_models(db, specs, question_sets, scenarios, baselines, *, repeat=1, budg
                 if scenarios:
                     rows = evaluate_scenarios(db, scenarios, client, departments)
                     run['scenarios.yaml'] = {'summary': summarize(rows), 'rows': rows}
+                if answer_client is not None:
+                    rows = evaluate_followups(db, followups, client, answer_client, departments)
+                    run['followups.yaml'] = {'summary': summarize(rows), 'rows': rows}
                 if no_glossary and 'paraphrase.yaml' in question_sets:
                     rows = evaluate_questions(db, question_sets['paraphrase.yaml'], client, departments,
                                               baselines.get('paraphrase.yaml', {}), use_glossary=False)
@@ -302,7 +375,7 @@ def print_report(report):
         print(f'{"指標":<36}' + ''.join(f'{s:>{width}}' for s in specs))
         for key, label, kind in SET_METRICS:
             aggs = [aggregate(models[s], name, key) for s in specs]
-            if kind == 'rate' and all(a is None for a in aggs):
+            if all(a is None for a in aggs) and (kind == 'rate' or key.startswith('followup_')):
                 continue
             print(f'{label:<36}' + ''.join(f'{fmt(a, kind):>{width}}' for a in aggs))
     for name in set_names:

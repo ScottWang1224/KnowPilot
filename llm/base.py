@@ -1,5 +1,5 @@
 """Shared types for every provider adapter."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -27,6 +27,7 @@ class LLMResult:
     validation_failed: bool = False
     prompt_hash: str = ''
     prompt_name: str = ''            # prompt file the caller built the system prompt from
+    attempt_output_tokens: list = field(default_factory=list)  # per attempt, to tell a truncated try from a long total
     error_detail: str | None = None  # short, key-free description for logs
 
 

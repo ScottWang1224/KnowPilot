@@ -12,6 +12,11 @@ asker is an in-memory user whose access still goes through document_scope() in S
 same question sets plus data/eval/scenarios.yaml, one model after another, and prints
 the models side by side (see scripts/eval_router.py). This calls the real APIs and is
 charged; the estimated cost is printed first and --estimate-only stops there.
+
+--answer-model provider:model [provider:model ...] evaluates answer generation instead
+(phase 3, see scripts/eval_answer.py): every question is routed once with a single router
+model (--router-model or LLM_ROUTER_MODEL), each answer model answers the same route, and
+the judge model (--judge-model or LLM_JUDGE_MODEL) scores the answers unless --no-judge.
 """
 import argparse
 import json
@@ -22,10 +27,11 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 from core.config import ROOT
+from llm import settings
 from llm.guard import DailyBudget
 from llm.pricing import Pricing
 from rag import index
-from scripts import eval_router
+from scripts import eval_answer, eval_router
 from scripts.local_db import open_database
 
 KS = (5, 10)
@@ -33,6 +39,7 @@ RECALL_TYPES = ('answerable', 'clarify', 'multi_doc')
 SEARCH_CHUNKS = 30  # at most 3 chunks per document, so 30 chunks always yield 10 documents when available
 QUESTION_SETS = ('questions.yaml', 'paraphrase.yaml')
 SCENARIOS = ROOT/'data'/'eval'/'scenarios.yaml'
+ADVERSARIAL = ROOT/'data'/'eval'/'adversarial.yaml'
 
 
 def ranked_docs(hits):
@@ -138,6 +145,48 @@ def print_estimate(specs, question_sets, scenarios, args):
         print(f'  {spec}：實際 {"無價格資料" if actual is None else f"${actual:.3f}"}，預算計入 ${charged:.3f}')
 
 
+def load_yaml(path):
+    return (yaml.safe_load(path.read_text(encoding='utf-8')) or []) if path.exists() else []
+
+
+def answer_main(args, parser):
+    """--answer-model: retrieval report as usual, then route once per question and answer with every model."""
+    if args.router_model and len(args.router_model) > 1:
+        parser.error('使用 --answer-model 時，--router-model 只能指定一個模型')
+    load_dotenv(ROOT/'.env')
+    router_spec = args.router_model[0] if args.router_model else settings.router_model()
+    if not router_spec:
+        parser.error('未設定路由模型：請在 .env 設定 LLM_ROUTER_MODEL，或使用 --router-model')
+    judge_spec = None if args.no_judge else (args.judge_model or settings.judge_model())
+    if not args.no_judge and not judge_spec:
+        parser.error('未設定評審模型：請在 .env 設定 LLM_JUDGE_MODEL、使用 --judge-model，或加 --no-judge')
+    files = [Path(f) for f in args.questions] if args.questions else \
+        [ROOT/'data'/'eval'/name for name in QUESTION_SETS if (ROOT/'data'/'eval'/name).exists()]
+    question_sets = {path.name: load_yaml(path) for path in files}
+    items = eval_answer.load_items(question_sets, load_yaml(SCENARIOS), load_yaml(ADVERSARIAL))
+    budget_note = f'${args.budget_usd}（--budget-usd）' if args.budget_usd is not None else '.env 的 LLM_DAILY_BUDGET_USD'
+    eval_answer.print_estimate(eval_answer.estimate(Pricing(), items, router_spec, args.answer_model, judge_spec), budget_note)
+    if judge_spec in args.answer_model:
+        print(f'註：{eval_answer.JUDGE_BIAS_NOTE}')
+    if args.estimate_only:
+        return 0
+    with open_database(args.use_env_db) as (db, _):
+        for name, questions in question_sets.items():
+            results = evaluate(db, questions)
+            print(f'\n===== {name} =====')
+            print_report(summarize(results), results)
+        print(f'\n開始回答評測（{len(items)} 題）...')
+        budget = DailyBudget(limit_usd=args.budget_usd) if args.budget_usd is not None else None
+        report = eval_answer.evaluate(db, items, router_spec, args.answer_model, judge_spec, budget=budget)
+    eval_answer.print_report(report)
+    path, stamp = eval_answer.save(report, ROOT/'.eval-runs')
+    print(f'\n結果已存到 {path.relative_to(ROOT)}')
+    if judge_spec:
+        labels = eval_answer.write_labels(report, ROOT/'.eval-runs', stamp)
+        print(f'人工標註表：{labels.relative_to(ROOT)}（評審結果對照檔另存，不含在標註表中）')
+    return 1 if eval_answer.leaked(report) else 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--use-env-db', action='store_true', help='use the database from .env instead of a fresh temporary one')
@@ -146,8 +195,13 @@ def main():
     parser.add_argument('--no-glossary', action='store_true', help='also run paraphrase.yaml without the glossary for comparison')
     parser.add_argument('--budget-usd', type=float, help='budget for this run, overriding LLM_DAILY_BUDGET_USD')
     parser.add_argument('--repeat', type=int, default=1, help='run the router evaluation N times to see how stable it is')
-    parser.add_argument('--estimate-only', action='store_true', help='print the estimated router cost and exit')
+    parser.add_argument('--estimate-only', action='store_true', help='print the estimated LLM cost and exit')
+    parser.add_argument('--answer-model', nargs='+', metavar='PROVIDER:MODEL', help='evaluate answer generation with these models')
+    parser.add_argument('--judge-model', metavar='PROVIDER:MODEL', help='judge for --answer-model, overrides LLM_JUDGE_MODEL')
+    parser.add_argument('--no-judge', action='store_true', help='with --answer-model: generate answers without judging them')
     args = parser.parse_args()
+    if args.answer_model:
+        return answer_main(args, parser)
     files = [Path(f) for f in args.questions] if args.questions else \
         [ROOT/'data'/'eval'/name for name in QUESTION_SETS if (ROOT/'data'/'eval'/name).exists()]
     question_sets = {path.name: yaml.safe_load(path.read_text(encoding='utf-8')) or [] for path in files}

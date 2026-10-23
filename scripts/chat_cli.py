@@ -1,8 +1,10 @@
-"""Run explicitly: python -m scripts.chat_cli --department MFG. Multi-turn router prototype.
+"""Run explicitly: python -m scripts.chat_cli --department MFG. Multi-turn router + answer prototype.
 
 Shows what the router decides each turn (clarifying question, selected chunks, tokens,
-latency, cost). No final answer is generated in phase 2. Uses a fresh temporary SQLite
-built from data/ unless --use-env-db is given; LLM settings and keys come from .env.
+latency, cost) and, when an answer model is set (LLM_ANSWER_MODEL or --answer-model),
+the cited answer. Without an answer model only the chunk list is shown, as in phase 2.
+Uses a fresh temporary SQLite built from data/ unless --use-env-db is given; LLM
+settings and keys come from .env.
 Commands: /new starts a new question, /quit exits. Type an option number to pick it.
 """
 import argparse
@@ -13,7 +15,8 @@ from dotenv import load_dotenv
 from core.config import ROOT
 from llm import settings
 from llm.client import create_client
-from rag import router
+from rag.answer import OUT_OF_SCOPE_TEXT, format_answer
+from rag.pipeline import Conversation, clarify_text, run_turn  # noqa: F401  clarify_text is imported from here by eval_router
 from scripts.local_db import open_database
 
 
@@ -25,9 +28,11 @@ def department_user(db, code):
     return {'id': 0, 'department_id': row['id']}
 
 
-def clarify_text(clarify):
-    """The assistant turn kept in history: the question and its numbered options."""
-    return clarify.question + ''.join(f'\n{i}. {option}' for i, option in enumerate(clarify.options, 1))
+def show_llm(llm, budget):
+    cost = '無價格資料' if llm.cost_usd is None else f'${llm.cost_usd:.6f}'
+    print(f'[LLM] {llm.provider}:{llm.model}  tokens in/out {llm.input_tokens}/{llm.output_tokens}  '
+          f'嘗試 {llm.attempts} 次{"（曾驗證失敗）" if llm.validation_failed else ""}  延遲 {llm.latency_ms} ms')
+    print(f'[成本] 實際 {cost}  預算計入 ${llm.budget_cost_usd:.6f}  今日累計 ${budget.spent:.6f}')
 
 
 def show(result, client):
@@ -54,11 +59,30 @@ def show(result, client):
         for hit in result.chunks:
             print(f'  {hit.chunk_id:<16} {hit.section_path}')
     if result.llm:
-        llm = result.llm
-        cost = '無價格資料' if llm.cost_usd is None else f'${llm.cost_usd:.6f}'
-        print(f'[LLM] {llm.provider}:{llm.model}  tokens in/out {llm.input_tokens}/{llm.output_tokens}  '
-              f'嘗試 {llm.attempts} 次{"（曾驗證失敗）" if llm.validation_failed else ""}  延遲 {llm.latency_ms} ms')
-        print(f'[成本] 實際 {cost}  預算計入 ${llm.budget_cost_usd:.6f}  今日累計 ${client.budget.spent:.6f}')
+        show_llm(result.llm, client.budget)
+
+
+def show_answer(turn, client):
+    route, result = turn.route, turn.answer
+    if route.action == 'out_of_scope':
+        print(f'\n[回答] {OUT_OF_SCOPE_TEXT}')
+        return
+    if result is None or result.status == 'skipped':
+        return
+    print(f'\n[回答 status] {result.status}' + (f'  [error] {result.error}' if result.error else ''))
+    if result.error in ('budget_exceeded', 'busy'):
+        print('  ' + ('今日體驗額度已用完' if result.error == 'budget_exceeded' else '系統忙碌，請稍後再試')
+              + '；相關文件：' + '、'.join(dict.fromkeys(h.doc_code for h in route.chunks)))
+    if result.output:
+        print(format_answer(result.output))
+    if result.removed_citations or result.dropped_points:
+        print(f'[移除的引用] {", ".join(result.removed_citations) or "（無）"}  [刪除的要點] {result.dropped_points}')
+    if result.llm:
+        show_llm(result.llm, client.budget)
+    costs = [c.llm.cost_usd for c in (route, result) if c.llm]
+    if costs:
+        total = '無價格資料' if any(c is None for c in costs) else f'${sum(costs):.6f}'
+        print(f'[本輪合計] 路由＋回答 {total}')
 
 
 def main():
@@ -66,6 +90,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--department', required=True, help='department code, e.g. MFG, PE, QA, RD, ADM')
     parser.add_argument('--router-model', help='provider:model-id, overrides LLM_ROUTER_MODEL')
+    parser.add_argument('--answer-model', help='provider:model-id, overrides LLM_ANSWER_MODEL')
     parser.add_argument('--use-env-db', action='store_true', help='use the database from .env instead of a fresh temporary one')
     args = parser.parse_args()
     load_dotenv(ROOT/'.env')
@@ -73,10 +98,13 @@ def main():
     if not spec:
         raise SystemExit('未設定路由模型：請在 .env 設定 LLM_ROUTER_MODEL，或使用 --router-model 供應商:模型ID')
     client = create_client(spec, purpose='router')
+    answer_spec = args.answer_model or settings.answer_model()
+    answer_client = create_client(answer_spec, purpose='answer') if answer_spec else None
     with open_database(args.use_env_db) as (db, source):
         user = department_user(db, args.department)
-        print(f'部門 {args.department.upper()}｜模型 {spec}｜資料庫 {source}\n輸入問題；數字選擇選項；/new 新問題；/quit 離開')
-        history, state, turns, options = [], None, 0, []
+        print(f'部門 {args.department.upper()}｜路由 {spec}｜回答 {answer_spec or "（未設定，只顯示段落）"}｜資料庫 {source}\n'
+              '輸入問題；數字選擇選項；/new 新問題；/quit 離開')
+        conv, options = Conversation(), []
         while True:
             try:
                 text = input('\n> ').strip()
@@ -87,24 +115,24 @@ def main():
             if text == '/quit':
                 break
             if text == '/new':
-                history, state, turns, options = [], None, 0, []
+                conv.reset()
+                options = []
                 print('（已清除，請輸入新問題）')
                 continue
             if text.isdigit() and 1 <= int(text) <= len(options):
                 text = options[int(text) - 1]
                 print(f'（選擇：{text}）')
-            result = router.route(db, user, text, history=history, state=state, clarify_turns=turns, client=client)
-            show(result, client)
-            if result.error == 'invalid_input':
+            turn = run_turn(db, user, text, conv, router_client=client, answer_client=answer_client)
+            show(turn.route, client)
+            if turn.route.error == 'invalid_input':
                 continue
-            if result.action == 'clarify':
-                history += [{'role': 'user', 'content': text},
-                            {'role': 'assistant', 'content': clarify_text(result.decision.clarify)}]
-                state, turns, options = result.decision.state, turns + 1, result.decision.clarify.options
-            else:
-                # Phase 2 has no follow-up conversation: the next input starts a new question.
-                history, state, turns, options = [], None, 0, []
-                print('\n（下一個輸入視為新問題）')
+            if turn.route.action == 'clarify':
+                options = turn.route.decision.clarify.options
+                continue
+            show_answer(turn, client)
+            # No follow-up conversation yet (phase 4 decides): the next input starts a new question.
+            options = []
+            print('\n（下一個輸入視為新問題）')
     return 0
 
 

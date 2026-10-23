@@ -50,6 +50,7 @@ def test_invalid_json_retries_once_with_the_error_then_gives_up():
     assert retry_messages[-2] == {'role': 'assistant', 'content': '不是 JSON'}
     assert '無法通過驗證' in retry_messages[-1]['content']
     assert result.input_tokens == 200  # both attempts are counted
+    assert result.attempt_output_tokens == [50, 50]  # per attempt, so a truncated try is visible
 
 
 def test_invalid_then_valid_json_succeeds():

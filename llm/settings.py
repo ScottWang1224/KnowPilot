@@ -44,3 +44,11 @@ def router_model():
 
 def answer_model():
     return os.getenv('LLM_ANSWER_MODEL', '')
+
+
+def judge_model():
+    return os.getenv('LLM_JUDGE_MODEL', '')
+
+
+def judge_max_tokens():
+    return _int('LLM_JUDGE_MAX_TOKENS', 2000)

@@ -66,7 +66,7 @@ class LLM:
         return self._log(result)
 
     def _run(self, result, system, messages, schema, max_tokens):
-        cfg = self.pricing.config(self.spec)
+        cfg = self.pricing.config(self.spec, self.purpose)
         unpriced = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if not self.budget.allows_call():
@@ -100,6 +100,7 @@ class LLM:
         """Add one attempt's tokens and cost; charge the daily budget. Returns whether any attempt was unpriced."""
         if not input_tokens and not output_tokens:
             return unpriced
+        result.attempt_output_tokens.append(output_tokens)
         result.input_tokens += input_tokens
         result.output_tokens += output_tokens
         actual = self.pricing.actual_cost(self.spec, input_tokens, output_tokens)

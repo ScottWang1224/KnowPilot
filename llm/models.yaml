@@ -15,6 +15,8 @@
 #   json_mode                           openai_compatible 是否啟用 response_format json_object（不取代 Pydantic 驗證）
 #   reasoning_effort                    openai_compatible 推理型模型的推理強度（minimal / low / medium / high）；
 #                                       思考 token 計入輸出上限，路由建議 low
+#   purpose_overrides                   依用途（router / answer / judge）覆寫上面的行為設定，例如評審用較高的推理強度；
+#                                       不得在這裡設定價格
 #   note                                備註
 #
 # 範例（填好價格後移除註解）：
@@ -37,6 +39,9 @@ models:
     max_tokens_param: max_completion_tokens
     reasoning_effort: low
     json_mode: true
+    purpose_overrides:
+      judge:
+        reasoning_effort: medium
     note: "cached input $0.01 未計入；需設 reasoning_effort none/low"
   "anthropic:claude-haiku-5-5":
     input_per_mtok: 0.10

@@ -38,3 +38,8 @@ models:
     reasoning_effort: low
     json_mode: true
     note: "cached input $0.01 未計入；需設 reasoning_effort none/low"
+  "anthropic:claude-haiku-5-5":
+    input_per_mtok: 0.10
+    output_per_mtok: 0.50
+    effort: low
+    note: "價格適用於 100K token 以下的 prompt（超過為 $0.50／$2.50）；thinking 預設開啟，思考 token 計入 max_tokens"

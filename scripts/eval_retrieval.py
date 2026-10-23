@@ -7,6 +7,11 @@ paraphrase.yaml (if present) are evaluated and reported separately.
 Builds a temporary SQLite database from data/ (migrate + seed) unless --use-env-db is
 given, so results do not depend on the local development database. Each question's
 asker is an in-memory user whose access still goes through document_scope() in SQL.
+
+--router-model provider:model [provider:model ...] also evaluates the LLM router on the
+same question sets plus data/eval/scenarios.yaml, one model after another, and prints
+the models side by side (see scripts/eval_router.py). This calls the real APIs and is
+charged; the estimated cost is printed first and --estimate-only stops there.
 """
 import argparse
 import json
@@ -15,14 +20,19 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 from core.config import ROOT
+from llm.guard import DailyBudget
+from llm.pricing import Pricing
 from rag import index
+from scripts import eval_router
 from scripts.local_db import open_database
 
 KS = (5, 10)
 RECALL_TYPES = ('answerable', 'clarify', 'multi_doc')
 SEARCH_CHUNKS = 30  # at most 3 chunks per document, so 30 chunks always yield 10 documents when available
 QUESTION_SETS = ('questions.yaml', 'paraphrase.yaml')
+SCENARIOS = ROOT/'data'/'eval'/'scenarios.yaml'
 
 
 def ranked_docs(hits):
@@ -116,28 +126,68 @@ def print_report(summary, results):
         print(f'  {r["id"]} {r["question"]}\n      預期 {r["expected"]}\n      取得 {r["retrieved"][:6]}')
 
 
+def print_estimate(specs, question_sets, scenarios, args):
+    n_questions = sum(len(q) for q in question_sets.values())
+    n_glossary = len(question_sets.get('paraphrase.yaml', [])) if args.no_glossary else 0
+    calls, costs = eval_router.estimate_cost(Pricing(), specs, n_questions, len(scenarios), args.repeat, n_glossary)
+    budget = f'${args.budget_usd}（--budget-usd）' if args.budget_usd is not None else '.env 的 LLM_DAILY_BUDGET_USD'
+    print(f'路由評測預估：每個模型約 {calls:.0f} 次呼叫（題目 {n_questions}、情境 {len(scenarios)}、'
+          f'術語表對照 {n_glossary}，×{args.repeat} 次），以每次 {eval_router.EST_INPUT_TOKENS:,} input／'
+          f'{eval_router.EST_OUTPUT_TOKENS} output token 估算（偏高）；預算上限 {budget}')
+    for spec, (actual, charged) in costs.items():
+        print(f'  {spec}：實際 {"無價格資料" if actual is None else f"${actual:.3f}"}，預算計入 ${charged:.3f}')
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--use-env-db', action='store_true', help='use the database from .env instead of a fresh temporary one')
     parser.add_argument('--questions', nargs='+', help='question files (default: data/eval/questions.yaml and paraphrase.yaml)')
+    parser.add_argument('--router-model', nargs='+', metavar='PROVIDER:MODEL', help='also evaluate the router with these models')
+    parser.add_argument('--no-glossary', action='store_true', help='also run paraphrase.yaml without the glossary for comparison')
+    parser.add_argument('--budget-usd', type=float, help='budget for this run, overriding LLM_DAILY_BUDGET_USD')
+    parser.add_argument('--repeat', type=int, default=1, help='run the router evaluation N times to see how stable it is')
+    parser.add_argument('--estimate-only', action='store_true', help='print the estimated router cost and exit')
     args = parser.parse_args()
     files = [Path(f) for f in args.questions] if args.questions else \
         [ROOT/'data'/'eval'/name for name in QUESTION_SETS if (ROOT/'data'/'eval'/name).exists()]
+    question_sets = {path.name: yaml.safe_load(path.read_text(encoding='utf-8')) or [] for path in files}
+    scenarios = []
+    if args.router_model:
+        load_dotenv(ROOT/'.env')  # API keys and LLM limits; the database stays the temporary one
+        scenarios = yaml.safe_load(SCENARIOS.read_text(encoding='utf-8')) or [] if SCENARIOS.exists() else []
+        print_estimate(args.router_model, question_sets, scenarios, args)
+        if args.estimate_only:
+            return 0
+    router_report = None
     with open_database(args.use_env_db) as (db, source):
         runs = {}
-        for path in files:
-            results = evaluate(db, yaml.safe_load(path.read_text(encoding='utf-8')) or [])
-            runs[path.name] = {'summary': summarize(results), 'results': results}
-    for name, run in runs.items():
-        print(f'\n===== {name} =====')
-        print_report(run['summary'], run['results'])
+        for name, questions in question_sets.items():
+            results = evaluate(db, questions)
+            runs[name] = {'summary': summarize(results), 'results': results}
+        for name, run in runs.items():
+            print(f'\n===== {name} =====')
+            print_report(run['summary'], run['results'])
+        if args.router_model:
+            print('\n開始路由評測 ...')
+            baselines = {name: {r['id']: r for r in run['results']} for name, run in runs.items()}
+            budget = DailyBudget(limit_usd=args.budget_usd) if args.budget_usd is not None else None
+            router_report = eval_router.run_models(db, args.router_model, question_sets, scenarios, baselines,
+                                                   repeat=args.repeat, budget=budget, no_glossary=args.no_glossary)
+    if router_report:
+        eval_router.print_report(router_report)
     out = ROOT/'.eval-runs'
     out.mkdir(exist_ok=True)
-    path = out/f'{datetime.now():%Y%m%d-%H%M%S}_retrieval.json'
+    path = out/f'{datetime.now():%Y%m%d-%H%M%S}_{"router" if router_report else "retrieval"}.json'
     path.write_text(json.dumps({'created_at': datetime.now().isoformat(timespec='seconds'), 'database': source,
-                                'search_chunks': SEARCH_CHUNKS, 'sets': runs}, ensure_ascii=False, indent=2), encoding='utf-8')
+                                'search_chunks': SEARCH_CHUNKS, 'sets': runs, 'router': router_report},
+                               ensure_ascii=False, indent=2), encoding='utf-8')
     print(f'\n結果已存到 {path.relative_to(ROOT)}')
     leaked = any(run['summary'].get('unauthorized', {}).get('pass_rate', 1) < 1 for run in runs.values())
+    for runs_of_model in (router_report or {}).get('models', {}).values():
+        for run in runs_of_model:
+            for result in run.values():
+                rates = (result['summary']['unauthorized_pass'], result['summary']['scenario_must_not_pass'])
+                leaked |= any(rate is not None and rate < 1 for rate in rates)
     return 1 if leaked else 0
 
 

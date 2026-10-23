@@ -1,0 +1,153 @@
+# KnowPilot 多輪澄清情境（主規格 3.8）。供 2-D 評測腳本模擬多輪對話。
+#
+# 模擬方式：讀取助理追問的 clarify.dimension，從 replies 取同名鍵的回答送回；
+# 未列出的維度（包括 dimension 為 other）一律回答「不知道」。
+#
+# 欄位：
+#   id / asker_department / opening   情境編號、提問部門、開場白（刻意模糊）
+#   replies                           依維度 key 準備的模擬回答（維度見 rag/clarify_dimensions.yaml）
+#   expected_docs                     max_turns 內，最終段落應涵蓋的文件（情境完成率的計分依據）
+#   max_turns                         最多追問輪數
+#   expect_safety_note                是否預期在追問時出現 safety_note（false 表示不檢查）
+#   以下為選填，主規格未列出，2-D 實作時依此計分：
+#   acceptable_docs                   答案同樣成立的其他文件，只列入報告，不取代 expected_docs
+#   must_not_docs                     提問部門看不到的文件；任一輪的 selected 與最終段落都不得出現（權限檢查，必須 100%）
+#   expect_multiple_possibilities     預期最後以「多種可能」回答（使用者全程不知道）
+#   note                              給審閱者的說明，不參與計分
+#
+# 文件依據：每組的 expected_docs 都已確認提問部門可見；must_not_docs 都已確認提問部門不可見。
+
+# ---------- 異常現象 ----------
+- id: S01
+  asker_department: MFG
+  opening: CL-02 出來的膜怪怪的
+  replies:
+    phenomenon: 表面有線條
+    pattern: 斷斷續續
+    line: CL-02
+    product: RF-50
+    stage: 生產中
+  expected_docs: [MFG-SOP-009]
+  acceptable_docs: [MFG-RPT-001]
+  max_turns: 3
+  expect_safety_note: true
+  note: 主規格範例。「表面有線條」應對應 D01；MFG-RPT-001 是同型態（CL-02 RF-50 間歇條紋）的實例
+
+- id: S02
+  asker_department: MFG
+  opening: 今天收出來的卷看起來不太對
+  replies:
+    phenomenon: 卷的兩邊歪歪的，捲歪
+    pattern: 連續好幾卷都這樣
+    line: CL-02
+    product: RF-25
+    stage: 生產中
+  expected_docs: [MFG-RPT-002]
+  acceptable_docs: [MFG-RULE-003]
+  max_turns: 3
+  expect_safety_note: true
+  note: 「捲歪」為術語表中收卷不良（D11）的口語說法。MFG 沒有 D11 專屬 SOP，MFG-RPT-002 是唯一的處置實例；MFG-RULE-003 有 D11 記錄分級
+
+- id: S03
+  asker_department: MFG
+  opening: 膜上面有一些點點
+  replies:
+    phenomenon: 有顆粒、髒點
+    line: CL-01
+    product: HC-350
+    stage: 生產中
+  expected_docs: [MFG-SOP-011]
+  max_turns: 3
+  expect_safety_note: true
+  note: 「點點」可能是異物（D03）或其他點狀缺陷，需要追問現象；MFG-SOP-011 第 7 節有停線與通報規定
+
+- id: S04
+  asker_department: MFG
+  opening: CL-01 做出來的膜表面怪怪的
+  replies: {}
+  expected_docs: [MFG-SOP-009, MFG-SOP-011, QA-RULE-001]
+  max_turns: 3
+  expect_safety_note: true
+  expect_multiple_possibilities: true
+  note: 使用者全程回答「不知道」，驗證主規格 3.4 第 4 點；CL-01 表面異常最常見為條紋（D01）與異物（D03），兩份處置 SOP 都應列出；現象不明時也應附上全公司的品質異常通報總則
+
+# ---------- 品質客訴 ----------
+- id: S05
+  asker_department: QA
+  opening: 客戶說我們出的膜有問題，要怎麼處理？
+  replies:
+    phenomenon: 有異物顆粒
+    product: HC-350
+    line: CL-01
+  expected_docs: [QA-SOP-003]
+  acceptable_docs: [QA-8D-003, QA-RPT-001]
+  max_turns: 3
+  expect_safety_note: false
+  note: 客訴流程（受理、24 小時回覆、8D）不論現象都相同，QA-SOP-003 為必要文件；QA-8D-003 是 HC-350 異物客訴的實例
+
+# ---------- 新進人員流程 ----------
+- id: S06
+  asker_department: MFG
+  opening: 我是剛來的操作員，要多久才能自己顧一條線？
+  replies:
+    line: CL-01
+    employment: 正職
+  expected_docs: [MFG-TRN-002]
+  acceptable_docs: [ADM-TRN-001]
+  max_turns: 3
+  expect_safety_note: false
+  note: 技能檢定分一至三級，考核內容依產線不同，追問產線是合理的；ADM-TRN-001 為全公司新進訓練
+
+# ---------- 行政事務 ----------
+- id: S07
+  asker_department: PE
+  opening: 下個月要去客戶那邊，費用要怎麼處理？
+  replies:
+    trip: 國外
+    employment: 正職
+  expected_docs: [ADM-RULE-005]
+  acceptable_docs: [ADM-FORM-002]
+  max_turns: 3
+  expect_safety_note: false
+  note: 國內與國外出差的日支費、住宿上限與核准層級不同，應追問出差類型
+
+# ---------- 跨部門：同一開場白，不同部門 ----------
+- id: S08
+  asker_department: MFG
+  opening: RF 的離型力好像跑掉了，怎麼辦？
+  replies:
+    phenomenon: 離型力異常，快篩數值偏高
+    line: CL-02
+    product: RF-25
+    stage: 生產中
+  expected_docs: [MFG-SOP-010]
+  must_not_docs: [RD-RPT-002, RD-RPT-004]
+  max_turns: 3
+  expect_safety_note: true
+  note: 無權限部門提問。選項不得出現「配方」「觸媒」等只有 RD 文件支持的方向；MFG-SOP-010 有 A 級停線規定
+
+- id: S09
+  asker_department: QA
+  opening: RF 的離型力好像跑掉了，怎麼辦？
+  replies:
+    phenomenon: 離型力異常
+    product: RF-25
+    line: CL-02
+  expected_docs: [QA-SOP-002, QA-SPEC-005]
+  acceptable_docs: [QA-8D-002]
+  must_not_docs: [RD-RPT-002, RD-RPT-004, MFG-SOP-010]
+  max_turns: 3
+  expect_safety_note: true
+  note: QA 角度為量測方法、重測規則與 D09 判定；QA-8D-002 是 RF-25 離型力偏高客訴的實例
+
+- id: S10
+  asker_department: RD
+  opening: RF 的離型力好像跑掉了，怎麼辦？
+  replies:
+    product: RF-25
+    line: CL-02
+  expected_docs: [RD-RPT-002, RD-RPT-004]
+  must_not_docs: [MFG-SOP-010, QA-SOP-002, QA-8D-002]
+  max_turns: 3
+  expect_safety_note: false
+  note: RD 看得到觸媒濃度與固化條件的評估報告，選項可包含配方因素；看不到 MFG／QA 的處置與量測文件。RD 可見段落沒有 D09 代碼，路由可能以 other 維度追問

@@ -182,11 +182,12 @@ def test_openai_compatible_adapter_builds_request_and_reads_usage(monkeypatch):
     provider = OpenAICompatibleProvider(api_key='test-key', base_url='https://example.test/v1/')
     reply = provider.complete(model='m', system='s', messages=[{'role': 'user', 'content': 'q'}], max_tokens=800,
                               timeout=30, config={'max_tokens_param': 'max_completion_tokens', 'json_mode': True,
-                                                  'supports_temperature': False})
+                                                  'supports_temperature': False, 'reasoning_effort': 'low'})
     assert sent['url'] == 'https://example.test/v1/chat/completions' and sent['auth'] == 'Bearer test-key'
     assert sent['body']['messages'][0] == {'role': 'system', 'content': 's'}
     assert sent['body']['max_completion_tokens'] == 800 and 'temperature' not in sent['body']
     assert sent['body']['response_format'] == {'type': 'json_object'}
+    assert sent['body']['reasoning_effort'] == 'low'
     assert (reply.text, reply.input_tokens, reply.output_tokens) == (VALID, 90, 30)
     monkeypatch.delenv('OPENAI_API_KEY', raising=False)
     with pytest.raises(ProviderError):

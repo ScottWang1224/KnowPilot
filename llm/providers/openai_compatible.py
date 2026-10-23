@@ -27,6 +27,8 @@ class OpenAICompatibleProvider:
                 config.get('max_tokens_param', 'max_tokens'): max_tokens}
         if config.get('supports_temperature', True):
             body['temperature'] = 0
+        if config.get('reasoning_effort'):
+            body['reasoning_effort'] = config['reasoning_effort']
         if config.get('json_mode'):
             body['response_format'] = {'type': 'json_object'}
         request = urllib.request.Request(

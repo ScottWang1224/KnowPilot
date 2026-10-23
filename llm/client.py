@@ -48,12 +48,14 @@ class LLM:
         self.budget = budget or guard.default_budget()
         self.gate = gate or guard.default_gate()
 
-    def complete_json(self, *, system, messages, schema, max_tokens):
+    def complete_json(self, *, system, messages, schema, max_tokens, prompt_name=None, prompt_hash=None):
+        """prompt_name/prompt_hash identify the prompt file version when system also carries per-user data."""
         full_system = system + SCHEMA_INSTRUCTION.format(
             schema=json.dumps(schema.model_json_schema(), ensure_ascii=False))
         result = LLMResult(data=None, raw_text='', provider=self.provider.name, model=self.model,
                            input_tokens=0, output_tokens=0, latency_ms=0, cost_usd=0.0, error=None,
-                           prompt_hash=hashlib.sha256(system.encode()).hexdigest()[:12])
+                           prompt_hash=prompt_hash or hashlib.sha256(system.encode()).hexdigest()[:12],
+                           prompt_name=prompt_name or '')
         if not self.gate.try_enter():
             result.error = BUSY
             return self._log(result)
@@ -111,7 +113,8 @@ class LLM:
     def _log(self, result):
         # Never log prompts, replies or keys: only what is needed to compare models and spot failures.
         log.info(json.dumps({'purpose': self.purpose, 'provider': result.provider, 'model': result.model,
-                             'prompt_hash': result.prompt_hash, 'input_tokens': result.input_tokens,
+                             'prompt_name': result.prompt_name, 'prompt_hash': result.prompt_hash,
+                             'input_tokens': result.input_tokens,
                              'output_tokens': result.output_tokens, 'latency_ms': result.latency_ms,
                              'cost_usd': result.cost_usd, 'budget_cost_usd': round(result.budget_cost_usd, 6),
                              'attempts': result.attempts, 'validation_failed': result.validation_failed,

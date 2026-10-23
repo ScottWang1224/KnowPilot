@@ -1,18 +1,3 @@
-import pytest
-
-
-@pytest.fixture(scope='module')
-def seeded(tmp_path_factory):
-    from core.database import Database
-    from scripts.migrate import migrate
-    from scripts.seed import seed
-    db=Database.sqlite(tmp_path_factory.mktemp('rag')/'rag.db')
-    migrate(db,'sqlite')
-    seed(db)
-    departments={r['code']:r['id'] for r in db.query('SELECT id,code FROM departments')}
-    return db,departments
-
-
 def test_tokenize_keeps_codes_whole_and_splits_chinese_into_bigrams():
     from rag.tokenize import tokenize
     tokens=tokenize('ＣＬ02-OV-03 與 RF-25、HC-230AG 出現 D09，批號 C2-260209D-04 見 MFG-SOP-003')

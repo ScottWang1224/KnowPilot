@@ -1,0 +1,140 @@
+# 澄清維度：路由追問時可用的維度與選項（主規格 3.5、2-B 補充規格第 4 節）。
+#
+# 每個值的 match 中任一字串出現在使用者可見段落裡，才會保留並送入 prompt；
+# 過濾後不到 2 個值的維度整個移除；有 depends_on 的維度只在依賴的維度保留時保留。
+# 每個 match 都已在 data/ 確認至少命中一份文件。label 只用文件或術語表 QA-TRN-001 的用語。
+# label 內不要用「、」，送入 prompt 時用它分隔選項。
+
+dimensions:
+  line:
+    label: 產線
+    values:
+      - value: CL-01
+        label: 狹縫塗布／UV 固化
+        match: [CL-01]
+      - value: CL-02
+        label: 微凹版塗布
+        match: [CL-02]
+
+  product:
+    label: 產品
+    # 不含開發中產品
+    values:
+      - value: HC-200
+        match: [HC-200]
+      - value: HC-350
+        match: [HC-350]
+      - value: HC-230AG
+        label: 防眩／霧面
+        match: [HC-230AG]
+      - value: RF-12
+        match: [RF-12]
+      - value: RF-25
+        match: [RF-25]
+      - value: RF-50
+        match: [RF-50]
+
+  stage:
+    label: 製程階段
+    values:
+      - value: 開機
+        match: [開機]
+      - value: 生產中
+        match: [生產中]
+      - value: 換線
+        match: [換線]
+      - value: 停機
+        match: [停機]
+      - value: 清潔保養
+        match: [清潔, 保養]
+
+  phenomenon:
+    label: 異常現象
+    # 名稱依 QA-SPEC-005 章節標題；口語說法只用術語表 QA-TRN-001 有的
+    values:
+      - value: D01
+        label: 條紋／一條一條的／拉線
+        match: [D01]
+      - value: D02
+        label: 針孔
+        match: [D02]
+      - value: D03
+        label: 異物／顆粒／髒點／亮點
+        match: [D03]
+      - value: D04
+        label: 縮孔
+        match: [D04]
+      - value: D05
+        label: 橘皮
+        match: [D05]
+      - value: D06
+        label: 皺摺
+        match: [D06]
+      - value: D07
+        label: 刮傷
+        match: [D07]
+      - value: D08
+        label: 厚度不均
+        match: [D08]
+      - value: D09
+        label: 離型力異常
+        match: [D09]
+      - value: D10
+        label: 硬度不足
+        match: [D10]
+      - value: D11
+        label: 收卷不良／捲歪
+        match: [D11]
+
+  pattern:
+    label: 異常型態
+    depends_on: phenomenon
+    values:
+      - value: 連續
+        label: 一直出現
+        match: [連續]
+      - value: 間歇
+        label: 斷斷續續出現
+        match: [間歇]
+      - value: 固定位置
+        label: 每次都在同一個位置
+        match: [位置固定]
+      - value: 整面
+        label: 全幅
+        match: [全幅]
+
+  shift:
+    label: 班別
+    values:
+      - value: 早班
+        match: [早班]
+      - value: 中班
+        match: [中班]
+      - value: 夜班
+        match: [夜班]
+
+  employment:
+    label: 聘用類別
+    values:
+      - value: 正職
+        match: [正職]
+      - value: 約聘
+        match: [約聘]
+
+  day_type:
+    label: 日別
+    values:
+      - value: 平日
+        match: [平日]
+      - value: 休息日
+        match: [休息日]
+      - value: 國定假日
+        match: [國定假日]
+
+  trip:
+    label: 出差類型
+    values:
+      - value: 國內
+        match: [國內]
+      - value: 國外
+        match: [國外]

@@ -13,6 +13,8 @@
 #   max_tokens_param                    openai_compatible 的輸出上限參數名稱，預設 max_tokens；
 #                                       部分模型要求 max_completion_tokens
 #   json_mode                           openai_compatible 是否啟用 response_format json_object（不取代 Pydantic 驗證）
+#   reasoning_effort                    openai_compatible 推理型模型的推理強度（minimal / low / medium / high）；
+#                                       思考 token 計入輸出上限，路由建議 low
 #   note                                備註
 #
 # 範例（填好價格後移除註解）：
@@ -27,4 +29,12 @@
 #     json_mode: true
 #     note: ""
 
-models: {}
+models:
+  "openai_compatible:gpt-6-luna":
+    input_per_mtok: 0.10
+    output_per_mtok: 0.50
+    supports_temperature: false
+    max_tokens_param: max_completion_tokens
+    reasoning_effort: low
+    json_mode: true
+    note: "cached input $0.01 未計入；需設 reasoning_effort none/low"

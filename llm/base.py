@@ -26,6 +26,7 @@ class LLMResult:
     attempts: int = 0
     validation_failed: bool = False
     prompt_hash: str = ''
+    prompt_name: str = ''            # prompt file the caller built the system prompt from
     error_detail: str | None = None  # short, key-free description for logs
 
 
@@ -57,4 +58,5 @@ class Provider(Protocol):
 
 class LLMClient(Protocol):
     def complete_json(self, *, system: str, messages: list[dict], schema: type[BaseModel],
-                      max_tokens: int) -> LLMResult: ...
+                      max_tokens: int, prompt_name: str | None = None,
+                      prompt_hash: str | None = None) -> LLMResult: ...

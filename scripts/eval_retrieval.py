@@ -11,17 +11,13 @@ asker is an in-memory user whose access still goes through document_scope() in S
 import argparse
 import json
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
 import yaml
-from dotenv import load_dotenv
 from core.config import ROOT
-from core.database import Database, db_engine
 from rag import index
-from scripts.migrate import migrate
-from scripts.seed import seed
+from scripts.local_db import open_database
 
 KS = (5, 10)
 RECALL_TYPES = ('answerable', 'clarify', 'multi_doc')
@@ -127,14 +123,7 @@ def main():
     args = parser.parse_args()
     files = [Path(f) for f in args.questions] if args.questions else \
         [ROOT/'data'/'eval'/name for name in QUESTION_SETS if (ROOT/'data'/'eval'/name).exists()]
-    with tempfile.TemporaryDirectory() as tmp:
-        if args.use_env_db:
-            load_dotenv(ROOT/'.env')
-            db, source = Database.from_env(), db_engine()
-        else:
-            db, source = Database.sqlite(Path(tmp)/'eval.db'), 'temporary sqlite from data/'
-            migrate(db, 'sqlite')
-            seed(db)
+    with open_database(args.use_env_db) as (db, source):
         runs = {}
         for path in files:
             results = evaluate(db, yaml.safe_load(path.read_text(encoding='utf-8')) or [])

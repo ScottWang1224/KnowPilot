@@ -125,13 +125,13 @@ def test_responsive_employee_flow(portal,width,height):
             page.get_by_label('所屬部門',exact=True).select_option(label='製造部')
             page.get_by_role('button',name='儲存部門').click()
             expect(page.get_by_label('所屬部門',exact=True)).to_have_value('2')
-            assert len(dialogs)==1 and '對話紀錄將從對話清單中移除' in dialogs[0]
+            assert len(dialogs)==1 and '隱藏你先前的對話，並清除你的記憶' in dialogs[0]
             page.wait_for_timeout(300)
             assert patches==[]
             answers.append(True)
             page.get_by_label('所屬部門',exact=True).select_option(label='製造部')
             page.get_by_role('button',name='儲存部門').click()
-            expect(page.get_by_role('status')).to_have_text('已切換至製造部。')
+            expect(page.get_by_role('article').get_by_role('status')).to_have_text('已切換至製造部。')
             assert len(dialogs)==2 and len(patches)==1
             expect(page.locator('.sidebar-profile small')).to_have_text('製造部 · 員工')
             shot(page,'profile-switched')

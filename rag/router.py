@@ -21,7 +21,7 @@ from core.config import ROOT
 from llm import guard, settings
 from llm.base import LLMResult
 from llm.client import create_client
-from rag import glossary, index
+from rag import glossary, index, memory as memories
 from rag.index import ChunkHit
 
 log = logging.getLogger('knowpilot.rag')
@@ -49,14 +49,21 @@ class Clarify(BaseModel):
     safety_note: str | None = None
 
 
+class MemoryItem(BaseModel):
+    key: str
+    value: str
+
+
 class RouterOutput(BaseModel):
-    action: Literal['answer', 'clarify', 'out_of_scope']
+    action: Literal['answer', 'clarify', 'out_of_scope', 'remember']
     intent_summary: str = ''
     state: dict[str, Any] = {}
     rewritten_queries: list[str] = []
     selected: list[Selected] = []
     clarify: Clarify | None = None
     multiple_possibilities: bool = False
+    used_memory: list[str] = []                # keys of <memory> the model relied on
+    memory_proposal: list[MemoryItem] = []     # only when the user explicitly asked to remember
 
     @model_validator(mode='after')
     def clarify_needs_options(self):
@@ -67,13 +74,14 @@ class RouterOutput(BaseModel):
 
 @dataclass
 class RouteResult:
-    action: str                          # answer | clarify | out_of_scope (check error first)
+    action: str                          # answer | clarify | out_of_scope | remember (check error first)
     decision: RouterOutput | None        # model output after server-side corrections
-    chunks: list[ChunkHit]               # chunks for the answer model; [] for clarify / out_of_scope
+    chunks: list[ChunkHit]               # chunks for the answer model; [] for clarify / out_of_scope / remember
     fallback: str | None = None          # None | 'llm_error' | 'empty_selection'
     error: str | None = None             # invalid_input | budget_exceeded | busy | validation_failed | provider_error
     message: str | None = None           # Chinese message for invalid_input
     dropped_docs: list[str] = field(default_factory=list)
+    dropped_memory: int = 0              # memory_proposal items outside the user's memory options
     llm: LLMResult | None = None
 
 
@@ -102,6 +110,11 @@ def visible_dimensions(db, user, dimensions=None):
     allowed = index.visible_codes(db, user)
     text = '\n'.join(c.indexed_text for c in index.get_index(db).chunks if c.doc_code in allowed)
     return filter_dimensions(load_dimensions() if dimensions is None else dimensions, text)
+
+
+def memory_options(db, user):
+    """{key: [values]} the user may remember: their visible clarify dimensions plus the answer style."""
+    return memories.options_from(visible_dimensions(db, user))
 
 
 def format_dimensions(dimensions):
@@ -144,18 +157,26 @@ def chunk_preview(hit):
     return f'【{hit.doc_code} {hit.doc_title}｜{hit.section_path}】\n{body[:PROMPT_CHUNK_CHARS]}'
 
 
-def build_user_message(question, hits, state, clarify_turns):
+def build_user_message(question, hits, state, clarify_turns, memory=None, options=None):
+    """Memory goes in the user turn, not the system prompt, so each department's system prompt stays the same."""
     previews = '\n\n'.join(chunk_preview(h) for h in hits) or '（沒有相關段落）'
+    remembered = '' if memory is None else (f'<memory>{json.dumps(memory, ensure_ascii=False)}</memory>\n'
+                                            f'<memory_options>\n{memories.format_options(options)}\n</memory_options>\n')
     return (f'<clarify_turns>{clarify_turns}</clarify_turns>\n'
             f'<state>{json.dumps(state or {}, ensure_ascii=False)}</state>\n'
+            + remembered +
             f'<search_results>\n{previews}\n</search_results>\n'
             f'<question>{question}</question>')
 
 
 # ---- server-side corrections and chunk selection ------------------------------------------
 
-def correct(decision, visible, clarify_turns):
-    """Apply the server-side limits. Returns (corrected decision, dropped doc codes)."""
+def correct(decision, visible, clarify_turns, memory=None, options=None):
+    """Apply the server-side limits. Returns (corrected decision, dropped doc codes, dropped memory proposals).
+
+    Memory proposals outside the options are dropped like invisible doc codes; used_memory keeps
+    only keys that were in <memory>.
+    """
     selected, dropped = [], []
     for item in decision.selected:
         if item.doc_code not in visible:
@@ -166,11 +187,14 @@ def correct(decision, visible, clarify_turns):
              for k, v in list(decision.state.items())[:MAX_STATE_KEYS] if v is not None}
     update = {'selected': selected[:MAX_SELECTED_DOCS], 'state': state,
               'rewritten_queries': [q[:MAX_QUERY_CHARS] for q in decision.rewritten_queries if q.strip()][:MAX_QUERIES]}
+    proposal = [item for item in decision.memory_proposal if memories.is_valid(options or {}, item.key, item.value)]
+    update['memory_proposal'] = list({item.key: item for item in proposal}.values())
+    update['used_memory'] = [k for k in dict.fromkeys(decision.used_memory) if k in (memory or {})]
     if decision.clarify:
         update['clarify'] = decision.clarify.model_copy(update={'options': decision.clarify.options[:MAX_OPTIONS]})
     if decision.action == 'clarify' and clarify_turns >= MAX_CLARIFY_TURNS:
         update.update(action='answer', clarify=None, multiple_possibilities=True)
-    return decision.model_copy(update=update), dropped
+    return decision.model_copy(update=update), dropped, len(decision.memory_proposal) - len(proposal)
 
 
 def normalize_section(text):
@@ -219,7 +243,10 @@ def select_chunks(db, user, question, decision):
 
 # ---- entry point --------------------------------------------------------------------------
 
-def route(db, user, question, *, history=(), state=None, clarify_turns=0, client=None, use_glossary=True):
+def route(db, user, question, *, history=(), state=None, clarify_turns=0, client=None, use_glossary=True,
+          memory=None):
+    """memory: the user's validated work context ({key: value}, possibly empty) from the chat API.
+    None (evaluation, CLI) leaves the memory blocks out of the prompt."""
     if client is None:
         spec = settings.router_model()
         if not spec:
@@ -232,8 +259,9 @@ def route(db, user, question, *, history=(), state=None, clarify_turns=0, client
     prompt_text, prompt_hash = prompt_version()
     system = build_system(db, user, prompt_text, use_glossary=use_glossary)
     hits = index.search(db, user, question, k=PROMPT_CHUNKS)
+    options = None if memory is None else memory_options(db, user)
     messages = guard.trim_history(list(history)) + [
-        {'role': 'user', 'content': build_user_message(question, hits, state, clarify_turns)}]
+        {'role': 'user', 'content': build_user_message(question, hits, state, clarify_turns, memory, options)}]
     result = client.complete_json(system=system, messages=messages, schema=RouterOutput,
                                   max_tokens=settings.router_max_tokens(), prompt_name=PROMPT_FILE.name,
                                   prompt_hash=prompt_hash)
@@ -242,10 +270,16 @@ def route(db, user, question, *, history=(), state=None, clarify_turns=0, client
         return _logged(RouteResult('answer', None, hits[:FALLBACK_CHUNKS], fallback='llm_error',
                                    error=result.error or 'validation_failed', llm=result), clarify_turns)
 
-    decision, dropped = correct(result.data, index.visible_codes(db, user), clarify_turns)
+    if options is None and result.data.memory_proposal:
+        options = memory_options(db, user)   # proposals are checked even without memory blocks (evaluation, CLI)
+    decision, dropped, dropped_memory = correct(result.data, index.visible_codes(db, user), clarify_turns,
+                                                memory, options)
     if dropped:
         log.warning('router dropped invisible doc codes: %s', ','.join(dropped))
-    route_result = RouteResult(decision.action, decision, [], dropped_docs=dropped, llm=result)
+    if dropped_memory:
+        log.warning('router dropped %d memory proposals outside the options', dropped_memory)
+    route_result = RouteResult(decision.action, decision, [], dropped_docs=dropped, dropped_memory=dropped_memory,
+                               llm=result)
     if decision.action == 'answer':
         route_result.chunks = select_chunks(db, user, question, decision)
         if not route_result.chunks:
@@ -256,6 +290,6 @@ def route(db, user, question, *, history=(), state=None, clarify_turns=0, client
 def _logged(result, clarify_turns):
     # Never log the question or chunk text.
     log.info(json.dumps({'action': result.action, 'fallback': result.fallback, 'error': result.error,
-                         'dropped_docs': result.dropped_docs, 'chunks': len(result.chunks),
+                         'dropped_docs': result.dropped_docs, 'dropped_memory': result.dropped_memory, 'chunks': len(result.chunks),
                          'clarify_turns': clarify_turns}, ensure_ascii=False))
     return result

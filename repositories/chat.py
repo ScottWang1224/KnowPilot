@@ -78,12 +78,14 @@ def add_assistant_message(db, conversation_id, *, content, history_text, kind, p
 
 
 def history(db, conversation_id, before_id):
-    """Prompt history from messages before `before_id`: user/assistant pairs, skipping pairs whose reply was an error."""
+    """Prompt history from messages before `before_id`: user/assistant pairs, skipping pairs whose reply was
+    an error or a memory card (a request to remember is not part of the question being worked out)."""
     rows = db.query('SELECT role,kind,history_text FROM messages WHERE conversation_id=%s AND id<%s ORDER BY id',
                     (conversation_id, before_id))
     turns = []
     for question, reply in zip(rows, rows[1:]):
-        if question['role'] == 'user' and reply['role'] == 'assistant' and reply['kind'] != 'error' and reply['history_text']:
+        if (question['role'] == 'user' and reply['role'] == 'assistant' and reply['kind'] not in ('error', 'memory')
+                and reply['history_text']):
             turns += [{'role': 'user', 'content': question['history_text']},
                       {'role': 'assistant', 'content': reply['history_text']}]
     return turns
@@ -99,6 +101,13 @@ def hide(db, user, conversation_id):
         cursor.execute("UPDATE conversations SET hidden_at=%s,hidden_reason='user' WHERE id=%s AND "
                        + VISIBLE.replace('c.', ''), (utc_now(), conversation_id, user['id'], user['department_id']))
         return cursor.rowcount == 1
+
+
+def assistant_message(db, user, message_id):
+    """An assistant message in one of the user's visible conversations, else None."""
+    return db.query("SELECT m.* FROM messages m JOIN conversations c ON c.id=m.conversation_id "
+                    "WHERE m.id=%s AND m.role='assistant' AND " + VISIBLE,
+                    (message_id, user['id'], user['department_id']), one=True)
 
 
 # ---- feedback ----------------------------------------------------------------------------------

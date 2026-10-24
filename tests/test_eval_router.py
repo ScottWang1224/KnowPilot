@@ -122,3 +122,17 @@ def test_budget_exhaustion_stops_the_run_instead_of_scoring_fallbacks(seeded, mo
                                      'question': 'UV 燈管多久換？', 'expected_docs': ['MFG-SOP-001']}]}
     report = eval_router.run_models(db, ['fake:eval'], questions, [], {})
     assert report['aborted'] and report['models']['fake:eval'] == []
+
+
+def test_any_memory_proposal_counts_as_misproposal_and_remember_fails_the_item(seeded):
+    from scripts.eval_router import evaluate_questions, item_ok, summarize
+    db, departments = seeded
+    questions = [{'id': f'Q{n}', 'type': 'answerable', 'asker_department': 'MFG', 'question': 'CL-01 UV 燈管多久換？',
+                  'expected_docs': ['MFG-SOP-001']} for n in (1, 2, 3)]
+    proposal = [{'key': 'line', 'value': 'CL-01'}]
+    client, _ = make_client([answer('MFG-SOP-001'),
+                             json.dumps({**json.loads(answer('MFG-SOP-001')), 'memory_proposal': proposal}),
+                             json.dumps({'action': 'remember', 'memory_proposal': proposal})])
+    rows = evaluate_questions(db, questions, client, departments, {})
+    assert [item_ok(r) for r in rows] == [True, True, False]
+    assert summarize(rows)['memory_misproposal'] == round(2 / 3, 3)

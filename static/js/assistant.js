@@ -44,10 +44,72 @@ function relatedDocs(docs) {
   return list;
 }
 
+function memoryLink() {
+  const link = el('a', 'text-link memory-manage', '管理記憶');
+  link.href = '/profile#memory';
+  return link;
+}
+
+/* "已套用你的記憶：產線 CL-02、回答方式 簡短" above a reply that relied on memory. */
+function usedMemoryTag(used) {
+  const tag = el('p', 'memory-used');
+  tag.append(el('span', '', '已套用你的記憶：' + used.map((item) => `${item.label} ${item.value}`).join('、')), memoryLink());
+  return tag;
+}
+
+/* A proposal to remember: nothing is stored until 儲存; the server reads the items from the stored message.
+   略過 only hides the card on this page. */
+function memoryCard(messageId, card, onConfirm) {
+  const box = el('div', 'memory-card');
+  box.append(el('strong', 'memory-card-title', card.confirmed ? '已記住以下資訊' : '要記住以下資訊嗎？'));
+  const items = el('ul', 'memory-card-items');
+  for (const item of card.proposal) items.append(el('li', '', `${item.label}：${item.value}`));
+  const actions = el('div', 'memory-card-actions');
+  const status = el('span', 'memory-card-status');
+  status.setAttribute('role', 'status');
+  const done = () => {
+    box.classList.add('is-saved');
+    box.querySelector('.memory-card-title').textContent = '已記住以下資訊';
+    actions.replaceChildren(el('span', 'memory-card-done', '已記住'), memoryLink());
+  };
+  if (card.confirmed) {
+    box.append(items, actions);
+    done();
+    return box;
+  }
+  const save = el('button', 'button button-primary', '儲存');
+  const skip = el('button', 'button button-outline', '略過');
+  save.type = skip.type = 'button';
+  save.addEventListener('click', async () => {
+    save.disabled = skip.disabled = true;
+    status.textContent = '';
+    try {
+      await onConfirm(messageId);
+      done();
+    } catch (error) {
+      status.textContent = error.message;
+      save.disabled = skip.disabled = false;
+    }
+  });
+  skip.addEventListener('click', () => {
+    box.replaceChildren(el('span', 'memory-card-skipped', '已略過，不會記住。'));
+    box.classList.add('is-skipped');
+  });
+  actions.append(save, skip, status);
+  box.append(items, el('p', 'memory-card-note', '只會記住這些項目；問題中明確寫的條件仍然優先。'), actions);
+  return box;
+}
+
 /* The blocks of one assistant reply, in reading order; each one fades in on its own. */
-function replyBlocks(message, { latest, onOption, onFeedback }) {
+function replyBlocks(message, { latest, onOption, onFeedback, onConfirm }) {
   const payload = message.payload || {};
   const blocks = [];
+  if (payload.used_memory && payload.used_memory.length) blocks.push(usedMemoryTag(payload.used_memory));
+  if (message.kind === 'memory') {
+    if (payload.proposal && payload.proposal.length) blocks.push(memoryCard(message.id, payload, onConfirm));
+    else blocks.push(el('p', 'reply-text', payload.text || message.content));
+    return blocks;
+  }
   if (message.kind === 'clarify') {
     if (payload.safety_note) blocks.push(safetyBox(payload.safety_note));
     blocks.push(el('p', 'reply-text', payload.question));
@@ -71,11 +133,14 @@ function replyBlocks(message, { latest, onOption, onFeedback }) {
     }
     // The model writes `missing` as a full sentence ("文件沒有寫明…"), so it is shown as is, without a label.
     if (payload.missing) blocks.push(el('p', 'answer-missing', payload.missing));
-    blocks.push(feedbackBar(message, onFeedback));
   } else {
     blocks.push(el('p', 'reply-text', payload.text || message.content));
     if (payload.related_docs && payload.related_docs.length) blocks.push(relatedDocs(payload.related_docs));
   }
+  // A question that also asked to remember something: the card comes after the reply itself.
+  const proposal = payload.memory_proposal;
+  if (proposal && proposal.proposal && proposal.proposal.length) blocks.push(memoryCard(message.id, proposal, onConfirm));
+  if (message.kind === 'answer') blocks.push(feedbackBar(message, onFeedback));
   return blocks;
 }
 
@@ -201,6 +266,7 @@ KP_PAGES.assistant = async function assistantPage() {
       latest,
       onOption: (option) => submit(option),
       onFeedback: (id, rating, comment) => api(`/api/messages/${id}/feedback`, { method: 'PUT', body: { rating, comment } }),
+      onConfirm: (id) => api('/api/memories/confirm', { method: 'POST', body: { message_id: id } }),
     });
     blocks.forEach((block, i) => {
       if (animate) { block.classList.add('reveal'); block.style.animationDelay = `${i * REVEAL_STEP_MS}ms`; }

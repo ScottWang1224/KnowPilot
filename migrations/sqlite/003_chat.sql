@@ -20,7 +20,7 @@ CREATE TABLE messages (
     role TEXT NOT NULL CHECK (role IN ('user','assistant')),
     content TEXT NOT NULL,
     history_text TEXT,
-    kind TEXT CHECK (kind IN ('clarify','answer','out_of_scope','error')),
+    kind TEXT CHECK (kind IN ('clarify','answer','out_of_scope','error','memory')),
     payload TEXT,
     trace TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

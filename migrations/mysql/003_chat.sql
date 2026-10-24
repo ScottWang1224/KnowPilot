@@ -24,7 +24,7 @@ CREATE TABLE messages (
   role ENUM('user','assistant') NOT NULL,
   content MEDIUMTEXT NOT NULL,
   history_text MEDIUMTEXT NULL,
-  kind ENUM('clarify','answer','out_of_scope','error') NULL,
+  kind ENUM('clarify','answer','out_of_scope','error','memory') NULL,
   payload MEDIUMTEXT NULL,
   trace MEDIUMTEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

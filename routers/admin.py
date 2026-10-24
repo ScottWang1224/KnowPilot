@@ -14,6 +14,7 @@ from core.views import utc_iso
 from llm import settings
 from repositories import chat, content, stats, users
 from routers.chat import message_data
+from routers.memories import listing as memory_listing
 from routers.portal import document_data
 
 router=APIRouter(prefix='/api/admin',dependencies=[Depends(require_admin)])
@@ -48,6 +49,15 @@ def user_conversations(request:Request,user_id:Annotated[int,Path(ge=1)]):
                      'hidden_at':utc_iso(c['hidden_at']),'hidden_reason':c['hidden_reason'],'message_count':c['message_count'],
                      'created_at':utc_iso(c['created_at']),'updated_at':utc_iso(c['updated_at'])}
                     for c in chat.user_conversations(db,user_id)]}
+
+
+@router.get('/users/{user_id}/memories')
+def user_memories(request:Request,user_id:Annotated[int,Path(ge=1)]):
+    """Read-only: the user's current memory items, judged against the user's own options."""
+    db=request.app.state.db
+    owner=db.query('SELECT id,department_id FROM users WHERE id=%s',(user_id,),one=True)
+    if owner is None: raise HTTPException(404,'找不到這位使用者')
+    return {'data':memory_listing(db,owner)['items']}
 
 
 @router.get('/conversations/{conversation_id}/messages')

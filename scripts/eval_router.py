@@ -33,9 +33,15 @@ def turn_record(text, result):
     return {'input': text, 'action': result.action, 'error': result.error, 'fallback': result.fallback,
             'dimension': d.clarify.dimension if d and d.clarify else None,
             'options': d.clarify.options if d and d.clarify else None,
+            'clarify_text': clarify_text(d.clarify) if d and d.clarify else None,
             'safety_note': (d.clarify.safety_note or None) if d and d.clarify else None,
             'state': d.state if d else {}, 'queries': d.rewritten_queries if d else [], 'selected': [s.doc_code for s in d.selected] if d else [],
             'multiple_possibilities': bool(d and d.multiple_possibilities), 'dropped': result.dropped_docs,
+            # The question sets never ask to remember anything; any proposal (kept or dropped) is a mistake.
+            'memory_proposed': result.action == 'remember' or bool(d and d.memory_proposal) or result.dropped_memory > 0,
+            'used_memory': d.used_memory if d else [],
+            'memory_proposal': [p.model_dump() for p in d.memory_proposal] if d else [],
+            'dropped_memory': result.dropped_memory,
             'chunks': [h.chunk_id for h in result.chunks],
             'llm': None if llm is None else {
                 'input_tokens': llm.input_tokens, 'output_tokens': llm.output_tokens, 'latency_ms': llm.latency_ms,
@@ -43,15 +49,16 @@ def turn_record(text, result):
                 'validation_failed': llm.validation_failed, 'error_detail': llm.error_detail}}
 
 
-def run_dialogue(db, user, opening, client, reply_for, *, use_glossary=True, history=None):
+def run_dialogue(db, user, opening, client, reply_for, *, use_glossary=True, history=None, memory=None):
     """Route the opening and answer each clarifying question. Returns (turn records, final RouteResult).
 
-    history: earlier answered exchanges (follow-up questions); state and clarify turns start empty."""
+    history: earlier answered exchanges (follow-up questions); state and clarify turns start empty.
+    memory: the user's work context, as the chat API passes it (scripts.eval_memory); None elsewhere."""
     history, state, turns, text = list(history or []), None, 0, opening
     records = []
     while True:
         result = router.route(db, user, text, history=history, state=state, clarify_turns=turns,
-                              client=client, use_glossary=use_glossary)
+                              client=client, use_glossary=use_glossary, memory=memory)
         records.append(turn_record(text, result))
         if result.error == 'budget_exceeded':
             raise BudgetExhausted()
@@ -178,6 +185,8 @@ def evaluate_followups(db, items, client, answer_client, departments):
 def item_ok(row):
     """One pass/fail per item, used to compare models question by question."""
     kind = row['type']
+    if any(t['action'] == 'remember' for t in row['turns']):
+        return False
     if kind == 'followup':
         return (row.get('recall', 1) == 1 and not row.get('clarified') and not row.get('carried')
                 and not row['leaked'])
@@ -231,6 +240,7 @@ def summarize(rows):
         'validation_failed_calls': sum(c['validation_failed'] for c in calls),
         'retried_calls': sum(c['attempts'] > 1 for c in calls),
         'dropped_doc_calls': sum(bool(t['dropped']) for r in rows for t in r['turns']),
+        'memory_misproposal': _rate(any(t.get('memory_proposed') for t in r['turns']) for r in rows),
         'output_at_limit_calls': sum(c['output_tokens'] >= settings.router_max_tokens() for c in calls),
         'avg_input_tokens_per_call': round(mean(c['input_tokens'] for c in calls)) if calls else None,
         'avg_output_tokens_per_call': round(mean(c['output_tokens'] for c in calls)) if calls else None,
@@ -282,6 +292,7 @@ SET_METRICS = [  # (summary key, label, kind) kind: rate | count | tokens | ms |
     ('validation_failed_calls', 'JSON 驗證失敗的呼叫', 'count'),
     ('output_at_limit_calls', '輸出達 max_tokens 上限的呼叫', 'count'),
     ('dropped_doc_calls', '選到不可見文件而被丟棄的呼叫', 'count'),
+    ('memory_misproposal', '誤提記憶率（提議記住或 remember，必須為 0）', 'rate'),
     ('avg_input_tokens_per_call', '平均 input token／呼叫', 'tokens'),
     ('avg_output_tokens_per_call', '平均 output token／呼叫', 'tokens'),
     ('avg_tokens_per_item', '平均 token／題', 'tokens'),

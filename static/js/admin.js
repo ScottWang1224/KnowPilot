@@ -6,7 +6,8 @@ window.KP_PAGES = window.KP_PAGES || {};
 
 const ROLE_NAMES = { user: '員工', admin: '管理員' };
 const HIDDEN_REASONS = { user: '使用者隱藏', department_change: '切換部門隱藏' };
-const KIND_NAMES = { clarify: '追問', answer: '回答', out_of_scope: '超出範圍', error: '錯誤' };
+const KIND_NAMES = { clarify: '追問', answer: '回答', out_of_scope: '超出範圍', error: '錯誤', memory: '記憶' };
+const MEMORY_SOURCE_NAMES = { manual: '手動設定', chat: '對話中設定' };
 const STATUS_NAMES = { answered: '完整回答', partial: '部分回答', not_found: '找不到', unknown: '未知' };
 const dateTimeFormat = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit',
   day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -121,7 +122,15 @@ KP_PAGES.admin_user = async function adminUserPage() {
   const heading = document.querySelector('[data-id]');
   const list = document.getElementById('admin-conversation-list');
   const thread = document.getElementById('admin-thread');
-  const result = await api(`/api/admin/users/${heading.dataset.id}/conversations`);
+  const [result, { data: memories }] = await Promise.all([
+    api(`/api/admin/users/${heading.dataset.id}/conversations`), api(`/api/admin/users/${heading.dataset.id}/memories`)]);
+  document.getElementById('admin-memory').replaceChildren(dataTable([
+    { label: '項目', value: (m) => m.label },
+    { label: 'key', value: (m) => m.key },
+    { label: '值', value: (m) => m.valid ? m.value : `${m.value}（已失效）` },
+    { label: '來源', value: (m) => MEMORY_SOURCE_NAMES[m.source] || m.source },
+    { label: '更新時間', value: (m) => taipeiDateTime(m.updated_at) },
+  ], memories, '這位使用者目前沒有記憶。'));
   document.title = result.user.name + ' · 使用者對話 · KnowPilot';
   fill(heading, { name: result.user.name, email: result.user.email, department: '目前部門：' + result.user.department });
   document.querySelector('[data-conversation-empty]').hidden = result.data.length > 0;

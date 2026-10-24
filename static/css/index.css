@@ -51,3 +51,26 @@
 .admin-sources{--chat-scale:1;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}.admin-sources-label{font-size:12px;color:var(--muted);margin-right:2px}.admin-document-notice{font-size:13px;color:#8a4b1f;background:#fbeee3;border-left:3px solid #d0652a;padding:8px 12px;margin-bottom:16px;border-radius:4px}.trace{margin-top:10px;font-size:13px}.trace summary{cursor:pointer;color:var(--blue)}.trace dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:8px 0 0}.trace dt{color:var(--muted)}.trace dd{margin:0;overflow-wrap:anywhere}
 @media(max-width:1150px){.dashboard-grid{grid-template-columns:minmax(0,1fr)}.admin-thread-layout{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:650px){.admin-section{padding:18px 16px}.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat-value{font-size:22px}.bar-row{grid-template-columns:72px minmax(0,1fr);row-gap:2px}.bar-value{grid-column:2}.admin-table:not(.keep-table) thead{display:none}.admin-table:not(.keep-table),.admin-table:not(.keep-table) tbody,.admin-table:not(.keep-table) tr,.admin-table:not(.keep-table) td{display:block}.admin-table:not(.keep-table) tr{border-bottom:1px solid var(--line);padding:8px 0}.admin-table:not(.keep-table) td{border:0;padding:3px 0;display:grid;grid-template-columns:88px minmax(0,1fr);gap:8px}.admin-table:not(.keep-table) td::before{content:attr(data-label);color:var(--muted);font-size:12px}.admin-table:not(.keep-table) .numeric{text-align:left}.keep-table th,.keep-table td{white-space:nowrap;padding:8px}.trace dl{grid-template-columns:minmax(0,1fr)}.trace dd{margin-bottom:6px}}
+/* Agent memory: profile editor, chat memory card and used-memory tag, admin read-only table */
+.memory-panel{--chat-scale:1;max-width:1000px;margin-top:20px;padding:24px 38px 28px}
+.memory-heading{display:flex;align-items:center;gap:12px}.memory-heading h2{font-size:19px}
+.memory-intro{font-size:14px;margin:6px 0 16px}
+.memory-list{list-style:none;padding:0;margin:0;display:grid;gap:10px;max-width:640px}
+.memory-row{display:grid;grid-template-columns:7em minmax(0,1fr) 8.5em auto;align-items:center;gap:6px 12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.memory-label{font-size:14px;font-weight:600}
+.memory-select{height:40px;border:1px solid #cedbe4;border-radius:5px;padding:6px 10px;background:#fbfcfd;font-size:15px;min-width:0}
+.memory-meta{font-size:13px;color:var(--muted)}
+.memory-row.is-invalid .memory-meta{color:#a5481c;font-weight:600}
+.memory-remove{margin-left:0}.memory-remove[hidden]{display:inline;visibility:hidden}
+.memory-used{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:calc(13px*var(--chat-scale));color:#2b5a73;background:#eef4f7;border-radius:6px;padding:6px 12px}
+.memory-used .memory-manage,.memory-card .memory-manage{margin-top:0;font-size:calc(13px*var(--chat-scale))}
+.memory-card{display:grid;gap:8px;border:1px solid #b9d3d6;border-left:4px solid var(--teal);border-radius:6px;padding:12px 16px;background:#f6fafa}
+.memory-card-items{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-weight:600;color:#173b4b}
+.memory-card-note{font-size:calc(13px*var(--chat-scale));color:var(--muted)}
+.memory-card-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.memory-card-actions .button{min-height:36px;padding:6px 18px}
+.memory-card-status{font-size:calc(13px*var(--chat-scale));color:#a5481c}
+.memory-card-done{color:var(--teal);font-weight:700}
+.memory-card.is-skipped{border-left-color:#c3ced6;background:white;color:var(--muted)}
+.admin-memories .admin-table-wrap{max-width:900px}
+@media(max-width:650px){.memory-panel{padding:20px 18px 22px}.memory-row{grid-template-columns:minmax(0,1fr) auto}.memory-label{grid-column:1/-1}.memory-meta{grid-column:1/-1;grid-row:3}}

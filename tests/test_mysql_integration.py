@@ -37,7 +37,7 @@ def test_mysql_migration_seed_and_authorization(mysql_db):
     from scripts.seed_admin import seed_admin
     from repositories import content,users
     db=mysql_db
-    assert migrate(db,'mysql')==['001_init.sql','002_document_metadata.sql','003_chat.sql']
+    assert migrate(db,'mysql')==['001_init.sql','002_document_metadata.sql','003_chat.sql','004_memory.sql']
     assert migrate(db,'mysql')==[]
     seed(db)
     seed(db)

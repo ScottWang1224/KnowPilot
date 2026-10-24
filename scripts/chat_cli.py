@@ -52,8 +52,12 @@ def show(result, client):
             if decision.clarify.safety_note:
                 print(f'[安全提示] {decision.clarify.safety_note}')
             print(f'[追問：{decision.clarify.dimension}] {clarify_text(decision.clarify)}')
+        if decision.memory_proposal:
+            print(f'[提議記住] {", ".join(f"{m.key}={m.value}" for m in decision.memory_proposal)}')
     if result.dropped_docs:
         print(f'[丟棄的文件] {", ".join(result.dropped_docs)}')
+    if result.dropped_memory:
+        print(f'[丟棄的記憶提議] {result.dropped_memory} 項')
     if result.chunks:
         print('[要送給回答模型的段落]')
         for hit in result.chunks:
@@ -125,6 +129,9 @@ def main():
             turn = run_turn(db, user, text, conv, router_client=client, answer_client=answer_client)
             show(turn.route, client)
             if turn.route.error == 'invalid_input':
+                continue
+            if turn.route.action == 'remember':
+                print('\n（命令列不儲存記憶；對話維持原狀）')
                 continue
             if turn.route.action == 'clarify':
                 options = turn.route.decision.clarify.options

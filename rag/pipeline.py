@@ -29,7 +29,9 @@ class TurnResult:
 
 
 def history_text(turn):
-    """What the assistant turn leaves in history, or None when it stays out (errors, no answer)."""
+    """What the assistant turn leaves in history, or None when it stays out (errors, no answer, remember)."""
+    if turn.route.action == 'remember':
+        return None
     if turn.route.action == 'clarify':
         return clarify_text(turn.route.decision.clarify)
     if turn.route.action == 'out_of_scope':
@@ -40,19 +42,26 @@ def history_text(turn):
 
 
 def run_turn(db, user, text, conv, *, router_client=None, answer_client=None, use_glossary=True,
-             keep_history_after_answer=False):
+             keep_history_after_answer=False, memory=None):
     """Route `text` within `conv`. A clarifying question extends the conversation; anything else
     is answered (when an answer model is available).
 
     After an answer the conversation starts over, unless keep_history_after_answer (the chat API):
     then the exchange stays in history for follow-up questions and only state and clarify_turns
-    reset. A turn that ends in an error leaves the conversation as it was.
+    reset. A turn that ends in an error, or only asks to remember something, leaves the
+    conversation as it was, so a request to remember in the middle of clarifying does not
+    change what the router sees next.
+
+    memory: the user's validated rag.memory.Memory (chat API); None leaves memory out of both prompts.
     """
     route = router.route(db, user, text, history=conv.history, state=conv.state, clarify_turns=conv.clarify_turns,
-                         client=router_client, use_glossary=use_glossary)
+                         client=router_client, use_glossary=use_glossary,
+                         memory=None if memory is None else memory.context)
     if route.error == 'invalid_input':
         # Nothing was asked of the model; keep the conversation so the user can rephrase.
         return TurnResult(route, answer.answer(db, user, text, route))
+    if route.action == 'remember':
+        return TurnResult(route, None)
     if route.action == 'clarify':
         conv.history += [{'role': 'user', 'content': text},
                          {'role': 'assistant', 'content': clarify_text(route.decision.clarify)}]
@@ -60,7 +69,8 @@ def run_turn(db, user, text, conv, *, router_client=None, answer_client=None, us
         return TurnResult(route, None)
     result = None
     if answer_client is not None or settings.answer_model():
-        result = answer.answer(db, user, text, route, history=conv.history, client=answer_client)
+        result = answer.answer(db, user, text, route, history=conv.history, client=answer_client,
+                               preferences=None if memory is None else memory.preferences)
     turn = TurnResult(route, result)
     if not keep_history_after_answer:
         conv.reset()

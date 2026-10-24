@@ -17,9 +17,10 @@ from core.dependencies import get_current_user
 from core.views import utc_iso
 from llm import guard, settings
 from llm.client import LLM, provider_for
-from rag import answer as answers
+from rag import answer as answers, memory
 from rag.pipeline import Conversation, clarify_text, history_text, run_turn
 from repositories import chat
+from routers.memories import user_memory
 from schemas.chat import ChatRequest, FeedbackRequest
 
 log = logging.getLogger('knowpilot.chat')
@@ -111,9 +112,40 @@ def related_docs(route):
     return list(docs.values())[:RELATED_DOCS]
 
 
+def proposal_card(decision):
+    return {'proposal': [memory.described(item.key, item.value) for item in decision.memory_proposal],
+            'confirmed': False}
+
+
+def used_memory(turn, remembered):
+    """The memory items this reply relied on: context keys the router used, and the answer style
+    whenever the answer model was called with it."""
+    decision = turn.route.decision
+    used = [memory.described(key, remembered.context[key]) for key in decision.used_memory] if decision else []
+    if turn.answer is not None and turn.answer.llm is not None:
+        used += [memory.described(key, value) for key, value in remembered.preferences.items()]
+    return used
+
+
+def with_memory(turn, remembered, kind, payload):
+    """Add the memory card and the used-memory label to a clarify / answer / out_of_scope reply."""
+    decision = turn.route.decision
+    if kind in ('clarify', 'answer', 'out_of_scope') and decision and decision.memory_proposal:
+        payload['memory_proposal'] = proposal_card(decision)
+    used = used_memory(turn, remembered) if kind in ('clarify', 'answer') else []
+    if used:
+        payload['used_memory'] = used
+    return payload
+
+
 def reply_for(turn):
     """(kind, content, payload) of the assistant message."""
     route, result = turn.route, turn.answer
+    if route.action == 'remember':
+        card = proposal_card(route.decision)
+        if not card['proposal']:
+            return 'memory', memory.NOTHING_TO_REMEMBER, {'proposal': [], 'text': memory.NOTHING_TO_REMEMBER}
+        return 'memory', '要記住以下資訊嗎？' + '、'.join(f'{i["label"]} {i["value"]}' for i in card['proposal']), card
     if route.action == 'clarify':
         clarify = route.decision.clarify
         return 'clarify', clarify_text(clarify), {'question': clarify.question, 'options': clarify.options,
@@ -150,9 +182,13 @@ def llm_trace(result):
 def trace_for(turn):
     """Routing and answering summary for the admin pages; never chunk text."""
     route, result = turn.route, turn.answer
+    decision = route.decision
     return {'route_action': route.action, 'route_error': route.error, 'fallback': route.fallback,
-            'selected_docs': [s.doc_code for s in route.decision.selected] if route.decision else [],
+            'selected_docs': [s.doc_code for s in decision.selected] if decision else [],
             'chunk_ids': [hit.chunk_id for hit in route.chunks], 'dropped_docs': route.dropped_docs,
+            'used_memory': decision.used_memory if decision else [],
+            'memory_proposal': [item.model_dump() for item in decision.memory_proposal] if decision else [],
+            'dropped_memory': route.dropped_memory,
             'answer_status': result.status if result else None, 'answer_error': result.error if result else None,
             'removed_citations': result.removed_citations if result else [],
             'dropped_points': result.dropped_points if result else 0,
@@ -200,16 +236,18 @@ def run_question(request, db, user, conversation, message_id, text):
     router_client, answer_client = request.app.state.chat_clients(budget, recorder)
     conv = Conversation(history=chat.history(db, conversation['id'], message_id),
                         state=chat.loads(conversation['state']), clarify_turns=conversation['clarify_turns'])
+    remembered = user_memory(db, user)
     turn = run_turn(db, user, text, conv, router_client=router_client, answer_client=answer_client,
-                    keep_history_after_answer=True)
+                    keep_history_after_answer=True, memory=remembered)
     kind, content, payload = reply_for(turn)
-    failed = kind == 'error'
-    # An error leaves the conversation's state and clarify turns as they were.
+    payload = with_memory(turn, remembered, kind, payload)
+    unchanged = kind in ('error', 'memory')
+    # An error or a memory card leaves the conversation's state and clarify turns as they were.
     reply_id = chat.add_assistant_message(db, conversation['id'], content=content,
-                                          history_text=None if failed else history_text(turn), kind=kind,
+                                          history_text=None if unchanged else history_text(turn), kind=kind,
                                           payload=payload, trace=trace_for(turn),
-                                          state=None if failed else conv.state,
-                                          clarify_turns=None if failed else conv.clarify_turns)
+                                          state=None if unchanged else conv.state,
+                                          clarify_turns=None if unchanged else conv.clarify_turns)
     return reply_id, kind, payload
 
 

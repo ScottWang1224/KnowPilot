@@ -71,12 +71,15 @@ def prompt_version():
     return text, hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
-def build_user_message(question, route):
+def build_user_message(question, route, preferences=None):
+    """preferences: validated answer preferences ({'answer_style': '簡短'}); empty or None adds no block."""
     decision = route.decision
     intent = {'intent_summary': decision.intent_summary if decision else '', 'state': decision.state if decision else {}}
     multiple = bool(decision and decision.multiple_possibilities)
     sources = '\n\n'.join(f'[{hit.chunk_id}]\n{hit.text}' for hit in route.chunks)
+    preferred = f'<preferences>{json.dumps(preferences, ensure_ascii=False)}</preferences>\n' if preferences else ''
     return (f'<intent>{json.dumps(intent, ensure_ascii=False)}</intent>\n'
+            + preferred +
             f'<multiple_possibilities>{"true" if multiple else "false"}</multiple_possibilities>\n'
             f'<sources>\n{sources}\n</sources>\n'
             f'<question>{question}</question>')
@@ -112,9 +115,10 @@ def verify(output, allowed):
             removed, dropped)
 
 
-def answer(db, user, question, route, *, history=(), client=None):
-    """Answer from route.chunks. db and user are kept for the phase 4 API; access was already applied by the router."""
-    if route.error == 'invalid_input' or route.action in ('clarify', 'out_of_scope'):
+def answer(db, user, question, route, *, history=(), client=None, preferences=None):
+    """Answer from route.chunks. db and user are kept for the phase 4 API; access was already applied by the router.
+    preferences only change length and detail; citation, refusal and safety rules stay the same."""
+    if route.error == 'invalid_input' or route.action in ('clarify', 'out_of_scope', 'remember'):
         return _logged(AnswerResult(None, 'skipped'), route)
     if route.error in ('budget_exceeded', 'busy'):
         # The answer call would be refused for the same reason; the caller lists route.chunks instead.
@@ -127,7 +131,7 @@ def answer(db, user, question, route, *, history=(), client=None):
             raise RuntimeError('未設定 LLM_ANSWER_MODEL（格式：供應商:模型 ID），請在 .env 設定或傳入 client')
         client = create_client(spec, purpose='answer')
     prompt_text, prompt_hash = prompt_version()
-    messages = guard.trim_history(list(history)) + [{'role': 'user', 'content': build_user_message(question, route)}]
+    messages = guard.trim_history(list(history)) + [{'role': 'user', 'content': build_user_message(question, route, preferences)}]
     result = client.complete_json(system=prompt_text, messages=messages, schema=AnswerOutput,
                                   max_tokens=settings.answer_max_tokens(), prompt_name=PROMPT_FILE.name,
                                   prompt_hash=prompt_hash)

@@ -20,7 +20,7 @@ def test_migration_and_seed_reruns_preserve_existing_data(tmp_path):
     from scripts.migrate import migrate
     from scripts.seed import seed
     db=Database.sqlite(tmp_path/'seed.db')
-    assert migrate(db,'sqlite')==['001_init.sql','002_document_metadata.sql','003_chat.sql']
+    assert migrate(db,'sqlite')==['001_init.sql','002_document_metadata.sql','003_chat.sql','004_memory.sql']
     assert migrate(db,'sqlite')==[]
     seed(db)
     db.execute('UPDATE documents SET content=%s WHERE document_code=%s',('edited content','MFG-SOP-001'))

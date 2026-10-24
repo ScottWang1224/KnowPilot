@@ -307,6 +307,75 @@ function jumpToSection(article, section) {
   requestAnimationFrame(() => { heading.scrollIntoView({ block: 'start' }); heading.focus({ preventScroll: true }); });
 }
 
+/* "My memory" on the profile page: one row per key the server offers, values only from its options. */
+const MEMORY_SOURCES = { manual: '手動設定', chat: '對話中設定' };
+
+function memoryEditor(section) {
+  const list = section.querySelector('#memory-list');
+  const clear = section.querySelector('[data-clear-memory]');
+  const alert = section.querySelector('[data-memory-alert]');
+  const status = section.querySelector('[data-memory-status]');
+  const report = (text, isError = false) => {
+    alert.textContent = isError ? text : '';
+    alert.hidden = !isError;
+    status.textContent = isError ? '' : text;
+  };
+
+  function row(key, label, options, item) {
+    const li = el('li', 'memory-row' + (item && !item.valid ? ' is-invalid' : ''));
+    const id = 'memory-' + key;
+    const name = el('label', 'memory-label', label);
+    name.htmlFor = id;
+    const select = el('select', 'memory-select');
+    select.id = id;
+    select.append(new Option('未設定', ''));
+    if (item && !item.valid) select.append(new Option(`${item.value}（已失效）`, item.value, true, true));
+    for (const value of options) select.append(new Option(value, value, false, item?.valid && item.value === value));
+    const meta = el('span', 'memory-meta', item ? (item.valid ? MEMORY_SOURCES[item.source] || '' : '已失效，請重新選擇') : '');
+    const remove = el('button', 'text-button memory-remove', '刪除');
+    remove.type = 'button';
+    remove.hidden = !item;
+    remove.setAttribute('aria-label', `刪除${label}`);
+    select.addEventListener('change', () => (select.value ? save(key, label, select.value) : drop(key, label)));
+    remove.addEventListener('click', () => drop(key, label));
+    li.append(name, select, meta, remove);
+    return li;
+  }
+
+  function render({ items, options, labels }) {
+    const stored = Object.fromEntries(items.map((item) => [item.key, item]));
+    const keys = [...new Set([...Object.keys(options), ...Object.keys(stored)])];
+    list.replaceChildren(...keys.map((key) => row(key, labels[key] || stored[key]?.label || key, options[key] || [], stored[key])));
+    clear.hidden = items.length === 0;
+  }
+
+  async function run(request, done) {
+    try {
+      const result = await request();
+      render(result.data);
+      report(done);
+    } catch (error) {
+      report(error.message, true);
+      await load().catch(() => {});
+    }
+  }
+
+  const save = (key, label, value) => run(() => api('/api/memories/' + encodeURIComponent(key), { method: 'PUT', body: { value } }),
+    `已記住${label}：${value}。`);
+  const drop = (key, label) => run(() => api('/api/memories/' + encodeURIComponent(key), { method: 'DELETE' }), `已刪除${label}。`);
+
+  async function load() {
+    const { data } = await api('/api/memories');
+    render(data);
+  }
+
+  clear.addEventListener('click', () => {
+    if (!window.confirm('確定要清除全部記憶嗎？清除後無法復原。')) return;
+    run(() => api('/api/memories', { method: 'DELETE' }), '已清除全部記憶。');
+  });
+  return { load };
+}
+
 /* Pages; page scripts such as assistant.js add theirs to window.KP_PAGES before app.js runs. */
 const PAGES = {
   async index(user) {
@@ -373,15 +442,17 @@ const PAGES = {
     const form = document.getElementById('department-form');
     const select = form.querySelector('select');
     const status = main.querySelector('.form-status');
-    await loadDepartments(select, user.department.id);
+    const memory = memoryEditor(document.getElementById('memory'));
+    await Promise.all([loadDepartments(select, user.department.id), memory.load()]);
+    if (location.hash === '#memory') document.getElementById('memory').scrollIntoView();
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       showAlert('');
       status.textContent = '';
       const departmentId = Number(select.value);
       if (departmentId === user.department.id) return;
-      // Demo feature: switching department hides earlier conversations from this user.
-      if (!window.confirm('切換部門後，您之前的所有對話紀錄將從對話清單中移除，且無法再查看。\n\n確定要切換部門嗎？')) {
+      // Demo feature: switching department hides earlier conversations and deletes this user's memory.
+      if (!window.confirm('切換部門會隱藏你先前的對話，並清除你的記憶。\n\n確定要切換部門嗎？')) {
         select.value = user.department.id;
         return;
       }
@@ -391,7 +462,9 @@ const PAGES = {
         user = result.data;
         fill(main, userFields(user));
         renderUser(user);
-        status.textContent = `已切換至${user.department.name}。`;
+        status.textContent = `已切換至${user.department.name}。`
+          + (result.deleted_memories ? `已清除 ${result.deleted_memories} 項記憶。` : '');
+        await memory.load();
       } catch (error) {
         showAlert(error.message);
       }

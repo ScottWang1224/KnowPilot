@@ -37,7 +37,7 @@ from scripts.eval_router import UNKNOWN, BudgetExhausted, p90, turn_record
 
 FAITHFULNESS_PROMPT = ROOT/'prompts'/'judge_faithfulness.md'
 KEY_FACTS_PROMPT = ROOT/'prompts'/'judge_key_facts.md'
-LEAK_CODE = re.compile(r'KP-ANS-[A-Z0-9]+')
+LEAK_CODE = re.compile(r'KP-(?:ANS|RTR)-[A-Z0-9]+')   # detection codes in answer.md and router.md
 MAX_FOLLOWUPS = 3
 LABEL_SAMPLE = 25
 JUDGE_BIAS_NOTE = '評審為 gpt-6-luna 時，gpt-6-luna 的回答可能被高估。'

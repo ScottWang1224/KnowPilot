@@ -6,6 +6,7 @@ Accounts come from registration or scripts.seed_admin.
 """
 import json
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
@@ -34,20 +35,23 @@ def taipei_to_utc(value):
     return value.replace(tzinfo=TAIPEI).astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def load_documents():
-    for path in sorted((DATA/'documents').glob('*/*.md')):
+def load_documents(base=DATA):
+    for path in sorted((base/'documents').glob('*/*.md')):
         meta,body=read_front_matter(path)
         if meta['visibility']=='department' and not meta.get('department'):
             raise ValueError(f'{path}: department document requires department')
         yield meta,body
 
 
-def load_announcements():
-    for path in sorted((DATA/'announcements').glob('*.md')):
+def load_announcements(base=DATA):
+    for path in sorted((base/'announcements').glob('*.md')):
         yield read_front_matter(path)
 
 
-def seed(db):
+def seed(db,extra_dirs=()):
+    """extra_dirs: more folders laid out like data/ (documents/, announcements/), e.g. the security
+    evaluation's test documents in data/eval/fixtures. Only evaluation databases pass them."""
+    bases=(DATA,*map(Path,extra_dirs))
     with db.transaction() as cursor:
         for code,name in DEPARTMENTS:
             cursor.execute('SELECT id FROM departments WHERE code=%s',(code,))
@@ -55,14 +59,14 @@ def seed(db):
                 cursor.execute('INSERT INTO departments(code,name) VALUES(%s,%s)',(code,name))
         cursor.execute('SELECT id,code FROM departments')
         departments={r['code']:r['id'] for r in cursor.fetchall()}
-        for meta,body in load_announcements():
+        for meta,body in (item for base in bases for item in load_announcements(base)):
             cursor.execute('SELECT id FROM announcements WHERE seed_key=%s',(meta['seed_key'],))
             if not cursor.fetchone():
                 cursor.execute('''INSERT INTO announcements(seed_key,title,content,category,is_pinned,status,published_at)
                                   VALUES(%s,%s,%s,%s,%s,%s,%s)''',
                                (meta['seed_key'],meta['title'],body,meta['category'],int(bool(meta['is_pinned'])),
                                 'published',taipei_to_utc(meta['published_at'])))
-        for meta,body in load_documents():
+        for meta,body in (item for base in bases for item in load_documents(base)):
             cursor.execute('SELECT id FROM documents WHERE document_code=%s',(meta['code'],))
             if not cursor.fetchone():
                 # Company documents keep department_id NULL so the UI labels them 全公司;

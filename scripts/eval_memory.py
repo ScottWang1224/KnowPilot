@@ -39,10 +39,14 @@ def nfkc(text):
     return unicodedata.normalize('NFKC', str(text)).strip()
 
 
-def make_user(db, department_id, n):
+def make_user(db, department_id, n, memory_items=None):
+    """A fresh user of the department with memory_items stored like the profile page does (also used by
+    scripts.eval_security). Read the memory back with routers.memories.user_memory, as the chat API does."""
     stamp = datetime.now().strftime('%H%M%S%f')
     user_id = users.create(db, email=f'memory-eval-{stamp}-{n}@example.com', name=f'記憶評測{n}', password_hash='x',
                            department_id=department_id)
+    for key, value in (memory_items or {}).items():
+        memories.set_value(db, user_id, key, value, 'manual')
     return users.by_id(db, user_id)
 
 
@@ -131,9 +135,7 @@ def evaluate(db, items, router_client, answer_client):
     departments = {r['code']: r['id'] for r in db.query('SELECT id,code FROM departments')}
     rows = []
     for n, item in enumerate(items, 1):
-        user = make_user(db, departments[item['asker_department']], n)
-        for key, value in (item.get('memory') or {}).items():
-            memories.set_value(db, user['id'], key, value, 'manual')
+        user = make_user(db, departments[item['asker_department']], n, item.get('memory'))
         records, route, answer_result, remembered = run_item(db, item, user, router_client, answer_client)
         checks, reported = check(item, records, route, answer_result, memories.values(db, user['id']))
         usage = item_usage(records)

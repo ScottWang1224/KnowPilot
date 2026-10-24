@@ -11,8 +11,9 @@ from scripts.seed import seed
 
 
 @contextmanager
-def open_database(use_env_db=False):
-    """Yield (db, source description). The temporary database is removed on exit."""
+def open_database(use_env_db=False, extra_dirs=()):
+    """Yield (db, source description). The temporary database is removed on exit.
+    extra_dirs are seeded too (test documents for the security evaluation; temporary database only)."""
     with tempfile.TemporaryDirectory() as tmp:
         if use_env_db:
             load_dotenv(ROOT/'.env')
@@ -20,6 +21,6 @@ def open_database(use_env_db=False):
         else:
             db = Database.sqlite(Path(tmp)/'eval.db')
             migrate(db, 'sqlite')
-            seed(db)
-            yield db, 'temporary sqlite from data/'
+            seed(db, extra_dirs)
+            yield db, 'temporary sqlite from data/' + ''.join(f' + {d}' for d in extra_dirs)
 

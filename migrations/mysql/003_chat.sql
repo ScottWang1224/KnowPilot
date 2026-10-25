@@ -1,5 +1,5 @@
 -- Chat: conversations, messages, LLM call records and answer feedback. JSON is stored as TEXT, like 002.
--- Times are UTC (get_db_connection sets time_zone='+00:00'); the application writes them explicitly.
+-- Times are UTC (get_db_connection sets time_zone='+00:00'), and the application writes them explicitly.
 CREATE TABLE conversations (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT UNSIGNED NOT NULL,

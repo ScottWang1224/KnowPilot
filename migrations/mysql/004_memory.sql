@@ -1,5 +1,5 @@
 -- Agent memory: one structured value per user and key (rag/memory.py validates both), kept apart from chat.
--- Times are UTC; the application writes them explicitly.
+-- Times are UTC, and the application writes them explicitly.
 CREATE TABLE user_memories (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT UNSIGNED NOT NULL,

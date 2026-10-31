@@ -62,8 +62,9 @@ def change_department(request:Request,body:DepartmentChangeRequest,user=Depends(
         raise HTTPException(400,'請先確認切換部門會隱藏先前的對話紀錄')
     if not users.department_exists(db,body.department_id):
         raise HTTPException(400,'部門不存在')
-    hidden,deleted=users.change_department(db,user['id'],body.department_id)
-    return {'data':user_data(users.by_id(db,user['id'])),'hidden_conversations':hidden,'deleted_memories':deleted}
+    hidden,deleted,withdrawn=users.change_department(db,user['id'],body.department_id)
+    return {'data':user_data(users.by_id(db,user['id'])),'hidden_conversations':hidden,'deleted_memories':deleted,
+            'withdrawn_submissions':withdrawn}
 
 
 @router.get('/departments')

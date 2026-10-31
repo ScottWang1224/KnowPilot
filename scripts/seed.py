@@ -18,12 +18,15 @@ TAIPEI = timezone(timedelta(hours=8))
 DEPARTMENTS = [('MFG','製造部'),('PE','製程工程部'),('QA','品質保證部'),('RD','研發部'),('ADM','行政管理部')]
 
 
-def read_front_matter(path):
-    """Return (metadata, body) for a Markdown file that starts with a --- YAML block."""
-    text=path.read_text(encoding='utf-8')
+def parse_front_matter(text,where='text'):
+    """Return (metadata, body) for Markdown text that starts with a --- YAML block (also used for uploaded .md files)."""
     if not text.startswith('---\n') or (end:=text.find('\n---\n',4))<0:
-        raise ValueError(f'{path}: missing front matter')
+        raise ValueError(f'{where}: missing front matter')
     return yaml.safe_load(text[4:end]) or {}, text[end+5:].strip()
+
+
+def read_front_matter(path):
+    return parse_front_matter(path.read_text(encoding='utf-8'),path)
 
 
 def taipei_to_utc(value):
@@ -74,11 +77,13 @@ def seed(db,extra_dirs=()):
                 department_id=departments[meta['department']] if meta['visibility']=='department' else None
                 effective=taipei_to_utc(meta['effective_date'])
                 applies_to=json.dumps(meta['applies_to'],ensure_ascii=False) if meta.get('applies_to') else None
+                # owner_department_id decides who may submit revisions, company documents included.
                 cursor.execute('''INSERT INTO documents(document_code,title,summary,content,category,department_id,
-                                  visibility,version,status,applies_to,created_at,updated_at)
-                                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                                  owner_department_id,visibility,version,status,applies_to,created_at,updated_at)
+                                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
                                (meta['code'],meta['title'],meta['summary'],body,meta['category'],department_id,
-                                meta['visibility'],str(meta['version']),'published',applies_to,effective,effective))
+                                departments[meta['department']],meta['visibility'],str(meta['version']),'published',
+                                applies_to,effective,effective))
 
 
 if __name__=='__main__':

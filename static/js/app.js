@@ -279,6 +279,20 @@ function renderUser(user) {
   document.querySelectorAll('[data-logout]').forEach((node) => { node.hidden = false; });
   // Only a shortcut: every /api/admin/* call is still checked by require_admin.
   document.querySelectorAll('[data-admin-link]').forEach((node) => { node.hidden = user.role !== 'admin'; });
+  if (user.role === 'admin') showPendingReviews();
+}
+
+// The number of submissions waiting for review, next to 後台 in the sidebar. A failure only hides the badge.
+async function showPendingReviews() {
+  const badges = document.querySelectorAll('[data-admin-badge]');
+  try {
+    const { data } = await api('/api/admin/submissions/count');
+    badges.forEach((badge) => {
+      badge.textContent = data.pending;
+      badge.hidden = !data.pending;
+      badge.setAttribute('aria-label', `${data.pending} 筆文件待審核`);
+    });
+  } catch { badges.forEach((badge) => { badge.hidden = true; }); }
 }
 
 function documentFields(doc) {
@@ -433,6 +447,10 @@ const PAGES = {
     document.title = doc.title + ' · KnowPilot';
     fill(article, { ...documentFields(doc), version: '版本 ' + doc.version });
     fillMarkdown(article, { content: doc.content });
+    // Shortcuts only: the submissions API checks the department and pending revisions again.
+    article.querySelector('[data-revise]').hidden = !doc.can_edit;
+    article.querySelector('[data-revision-pending]').hidden = !doc.revision_pending;
+    article.querySelector('[data-document-actions]').hidden = !(doc.can_edit || doc.revision_pending);
     jumpToSection(article, new URLSearchParams(location.search).get('section'));
   },
 
@@ -451,8 +469,9 @@ const PAGES = {
       status.textContent = '';
       const departmentId = Number(select.value);
       if (departmentId === user.department.id) return;
-      // Demo feature: switching department hides earlier conversations and deletes this user's memory.
-      if (!window.confirm('切換部門會隱藏你先前的對話，並清除你的記憶。\n\n確定要切換部門嗎？')) {
+      // Demo feature: switching department hides earlier conversations, deletes this user's memory and
+      // withdraws their pending document submissions.
+      if (!window.confirm('切換部門會隱藏你先前的對話，並清除你的記憶。\n審核中的文件提交也會一併撤回。\n\n確定要切換部門嗎？')) {
         select.value = user.department.id;
         return;
       }
@@ -463,7 +482,8 @@ const PAGES = {
         fill(main, userFields(user));
         renderUser(user);
         status.textContent = `已切換至${user.department.name}。`
-          + (result.deleted_memories ? `已清除 ${result.deleted_memories} 項記憶。` : '');
+          + (result.deleted_memories ? `已清除 ${result.deleted_memories} 項記憶。` : '')
+          + (result.withdrawn_submissions ? `已撤回 ${result.withdrawn_submissions} 筆待審提交。` : '');
         await memory.load();
       } catch (error) {
         showAlert(error.message);

@@ -48,11 +48,14 @@ class Bm25Index:
                 yield total, i
 
 
+# One index per Database, in this process's memory. Publishing or archiving a document rebuilds it
+# (routers/admin_submissions.py), which only this process sees: with more than one uvicorn worker the
+# others would keep serving the old index, so the app runs a single worker until the index is shared.
 _indexes = weakref.WeakKeyDictionary()
 
 
 def rebuild(db):
-    """Re-read published content from the database. Call after seeding or editing documents."""
+    """Re-read published content from the database. Call after seeding, publishing or archiving documents."""
     chunks = []
     for row in db.query("SELECT document_code,title,content FROM documents WHERE status='published' ORDER BY document_code"):
         chunks.extend(chunk_document(row['document_code'], row['title'], row['content']))

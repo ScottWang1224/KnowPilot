@@ -30,6 +30,15 @@ cp .env.example .env                      # 填入 JWT_SECRET；預設 DB_ENGINE
 - 文件權限只由部門決定（`repositories/content.py` 的 `document_scope()`），角色只決定能否使用 `/api/admin/*`。
 - 頁面路由不做登入判斷，資料一律經過 API 的 `get_current_user`／`require_admin`。
 
+## 文件提交與審核
+
+- 任何使用者都可以在文件中心「新增文件」，或在自己部門的文件頁「提出修改」；內容為 Markdown（網頁編輯或上傳 UTF-8 `.md`，200 KB 以內，至少一個以 `##` 開頭的章節標題）。
+- 提交存在 `document_submissions`，**審核通過前不會進入 `documents`**，因此文件中心、`document_scope()` 與 AI 助理的檢索都看不到草稿。
+- 管理員在「後台 → 文件審核」發布或退回（退回須填原因）；發布時核發代碼（`{部門}-{類別}-{流水號}`）或依小改／大改進版，舊版存進 `document_revisions`，並立即重建 RAG 索引，不需重新部署。管理員也可在後台文件頁下架文件。
+- 提交內容視為不可信輸入：疑似寫給 AI 的指令、外部連結、HTML 標籤與同部門重複標題會在審核頁提醒（不阻擋）。術語表 `QA-TRN-001` 會進入所有部門的路由提示，不開放經由提交修改。
+- 每人同時最多 5 筆待審、每日最多送出 10 次；切換部門時，待審的提交會自動撤回。
+- RAG 索引在單一 process 的記憶體內，發布後只有該 process 立即生效，所以只能跑單一 uvicorn worker。
+
 ## 正式環境（MySQL 8.0.16+）
 
 設定 `APP_ENV=production`、`DB_ENGINE=mysql`、`DB_*`、`DB_SSL_CA`、`JWT_SECRET` 與 `ALLOWED_HOSTS`，
@@ -43,7 +52,7 @@ cp .env.example .env                      # 填入 JWT_SECRET；預設 DB_ENGINE
 
 ```bash
 .venv/Scripts/python -m pytest -q
-RUN_BROWSER_TESTS=1 .venv/Scripts/python -m pytest -q tests/test_browser.py   # 截圖存於 .test-artifacts/
+RUN_BROWSER_TESTS=1 .venv/Scripts/python -m pytest -q   # 含瀏覽器測試，截圖存於 .test-artifacts/
 ```
 
 MySQL 整合測試需設定 `KNOWPILOT_TEST_DB_*` 指向空的 `knowpilot_test_*` 資料庫。

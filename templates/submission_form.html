@@ -1,0 +1,18 @@
+{% extends 'base.html' %}{% block title %}{{ {'create': '新增文件', 'revise': '提出修改', 'resubmit': '修改後再送審'}[mode] }}{% endblock %}{% block scripts %}<script src="/static/js/submissions.js" defer></script>{% endblock %}{% block content %}<a class="back-link" href="{{ '/documents/' ~ doc_id if mode == 'revise' else ('/submissions' if mode == 'resubmit' else '/documents') }}">← {{ '返回文件' if mode == 'revise' else ('返回我的提交' if mode == 'resubmit' else '返回文件中心') }}</a>
+<div class="page-heading"><div><p class="eyebrow">DOCUMENT SUBMISSION</p><h1>{{ {'create': '新增文件', 'revise': '提出修改', 'resubmit': '修改後再送審'}[mode] }}</h1><p class="muted">送出後由管理員審核，通過後才會出現在文件中心，AI 助理也才查得到。審核前可以在「我的提交」撤回。</p></div><a class="text-link" href="/submissions">我的提交 {{ icon('arrow') }}</a></div>
+<form class="panel submission-form" id="submission-form" data-mode="{{ mode }}" data-document-id="{{ doc_id or '' }}" data-submission-id="{{ submission_id or '' }}" novalidate>
+<div class="alert" role="alert" hidden></div>
+<p class="submission-meta" data-revise-meta hidden>文件 <strong data-field="document_code"></strong>・目前版本 <span data-field="live_version"></span></p>
+<p class="review-note" data-review-note hidden><strong>退回原因：</strong><span data-field="review_note"></span></p>
+<div class="form-grid">
+<label for="sub-title">標題</label><input id="sub-title" name="title" maxlength="200" required>
+<label for="sub-summary">摘要</label><textarea id="sub-summary" name="summary" rows="2" maxlength="500" required></textarea>
+<label for="sub-category">分類</label><select id="sub-category" name="category">{% for category in categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}</select>
+<span class="form-label" id="visibility-label">可見範圍</span><div class="choice-group" role="radiogroup" aria-labelledby="visibility-label"><label><input type="radio" name="visibility" value="department" checked> 只限本部門</label><label><input type="radio" name="visibility" value="company"> 全公司</label></div>
+<label for="sub-note" data-revise-only hidden>修改說明</label><input id="sub-note" name="change_note" maxlength="500" placeholder="例如：補充第 3 節的通報時限" data-revise-only hidden>
+<span class="form-label" id="bump-label" data-revise-only hidden>進版方式</span><div class="choice-group" role="radiogroup" aria-labelledby="bump-label" data-revise-only hidden><label><input type="radio" name="version_bump" value="minor" checked> 小改（例如 1.3 → 1.4）</label><label><input type="radio" name="version_bump" value="major"> 大改（例如 1.3 → 2.0）</label></div>
+</div>
+<div class="editor-head"><label for="sub-content">內容（Markdown，至少一個「## 」開頭的章節標題）</label><button class="button button-outline" type="button" data-upload>上傳 .md</button><input class="sr-only" type="file" accept=".md,text/markdown" data-upload-input tabindex="-1" aria-hidden="true"></div>
+<div class="editor-grid"><textarea id="sub-content" name="content" rows="20" spellcheck="false"></textarea><section class="markdown-preview" aria-label="預覽"><p class="preview-label">預覽</p><div class="prose-text markdown" data-preview></div></section></div>
+<div class="form-actions"><span class="char-count" data-char-count></span><button type="submit" class="button button-primary">送出審核</button></div>
+</form>{% endblock %}

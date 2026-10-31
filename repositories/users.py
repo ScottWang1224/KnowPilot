@@ -2,6 +2,8 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
 
+from repositories.submissions import withdraw_pending
+
 USER_SELECT = '''SELECT u.id,u.email,u.name,u.department_id,u.role,u.is_active,u.created_at,
                         d.name AS department_name
                  FROM users u JOIN departments d ON d.id=u.department_id'''
@@ -24,10 +26,11 @@ def create(db,*,email,name,password_hash,department_id,role='user'):
 
 
 def change_department(db,user_id,department_id):
-    """Demo feature: move the user, hide their conversations and delete their memory in one transaction.
+    """Demo feature: move the user, hide their conversations, delete their memory and withdraw their pending
+    document submissions in one transaction.
 
-    Memory may describe the old department's work, so none of it carries over.
-    Returns (conversations hidden, memory items deleted).
+    Memory and submissions belong to the old department, so none of it carries over.
+    Returns (conversations hidden, memory items deleted, submissions withdrawn).
     """
     now=datetime.now(timezone.utc).replace(tzinfo=None,microsecond=0)
     with db.transaction() as cursor:
@@ -36,7 +39,8 @@ def change_department(db,user_id,department_id):
                        'WHERE user_id=%s AND hidden_at IS NULL',(now,user_id))
         hidden=cursor.rowcount
         cursor.execute('DELETE FROM user_memories WHERE user_id=%s',(user_id,))
-        return hidden,cursor.rowcount
+        deleted=cursor.rowcount
+        return hidden,deleted,withdraw_pending(cursor,user_id,now)
 
 
 def all_users(db):

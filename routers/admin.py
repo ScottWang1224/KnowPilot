@@ -81,7 +81,7 @@ def conversation_messages(request:Request,conversation_id:Annotated[int,Path(ge=
 
 @router.get('/documents/{doc_id}')
 def any_document(request:Request,doc_id:Annotated[int,Path(ge=1)]):
-    doc=content.published_document(request.app.state.db,doc_id)
+    doc=content.admin_document(request.app.state.db,doc_id)
     if doc is None: raise HTTPException(404,'找不到這份文件')
     return {'data':document_data(doc,with_content=True)}
 

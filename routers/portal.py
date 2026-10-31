@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from core.dependencies import get_current_user
 from core.views import render, utc_iso
 from llm import settings as llm_settings
-from repositories import content
+from repositories import content, submissions
+from repositories.submissions import CATEGORY_CODES
 
 pages=APIRouter()
 api=APIRouter(prefix='/api',dependencies=[Depends(get_current_user)])
@@ -40,6 +41,28 @@ def announcement_page(request:Request,item_id:Annotated[int,Path(ge=1)]):
 @pages.get('/documents')
 def documents_page(request:Request):
     return page(request,'documents.html','document')
+
+
+# Submission pages; declared before /documents/{doc_id} so "new" is not read as a document id.
+@pages.get('/documents/new')
+def new_document_page(request:Request):
+    return page(request,'submission_form.html','document',mode='create',categories=list(CATEGORY_CODES))
+
+
+@pages.get('/documents/{doc_id}/revise')
+def revise_document_page(request:Request,doc_id:Annotated[int,Path(ge=1)]):
+    return page(request,'submission_form.html','document',mode='revise',doc_id=doc_id,categories=list(CATEGORY_CODES))
+
+
+@pages.get('/submissions')
+def submissions_page(request:Request):
+    return page(request,'submissions.html','document')
+
+
+@pages.get('/submissions/{submission_id}/edit')
+def edit_submission_page(request:Request,submission_id:Annotated[int,Path(ge=1)]):
+    return page(request,'submission_form.html','document',mode='resubmit',submission_id=submission_id,
+                categories=list(CATEGORY_CODES))
 
 
 @pages.get('/documents/{doc_id}')
@@ -74,6 +97,16 @@ def admin_user_page(request:Request,user_id:Annotated[int,Path(ge=1)]):
     return page(request,'admin_user.html','admin',user_id=user_id)
 
 
+@pages.get('/admin/submissions')
+def admin_submissions_page(request:Request):
+    return page(request,'admin_submissions.html','admin')
+
+
+@pages.get('/admin/submissions/{submission_id}')
+def admin_submission_page(request:Request,submission_id:Annotated[int,Path(ge=1)]):
+    return page(request,'admin_submission.html','admin',submission_id=submission_id)
+
+
 @pages.get('/admin/documents/{doc_id}')
 def admin_document_page(request:Request,doc_id:Annotated[int,Path(ge=1)]):
     return page(request,'admin_document.html','admin',doc_id=doc_id)
@@ -105,7 +138,7 @@ def announcement_data(item):
 
 
 def document_data(doc,with_content=False):
-    keys=('id','document_code','title','summary','category','visibility','version','department_name')
+    keys=('id','document_code','title','summary','category','visibility','version','department_name','status')
     data={k:doc[k] for k in keys}
     data['updated_at']=utc_iso(doc['updated_at'])
     if with_content: data['content']=doc['content']
@@ -141,6 +174,10 @@ def documents(request:Request,user=Depends(get_current_user),q:Annotated[str,Que
 
 @api.get('/documents/{doc_id}')
 def document(request:Request,doc_id:Annotated[int,Path(ge=1)],user=Depends(get_current_user)):
-    doc=content.document(request.app.state.db,user,doc_id)
+    db=request.app.state.db
+    doc=content.document(db,user,doc_id)
     if doc is None: raise HTTPException(404,'找不到這份文件')
-    return {'data':document_data(doc,with_content=True)}
+    pending=submissions.pending_revision(db,doc_id)
+    # can_edit: the reader's department owns it and no revision is waiting for review.
+    return {'data':{**document_data(doc,with_content=True),'can_edit':submissions.editable(doc,user) and pending is None,
+                    'revision_pending':pending is not None}}

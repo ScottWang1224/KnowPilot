@@ -18,7 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from core.config import ROOT, Settings
 from core.database import Database
 from core.views import render
-from routers import admin, auth, chat, memories, portal
+from routers import admin, admin_submissions, auth, chat, memories, portal, submissions
 
 logger=logging.getLogger(__name__)
 FIELD_LABELS={'name':'名稱','email':'電子信箱','password':'密碼','department_id':'部門',
@@ -46,8 +46,10 @@ def create_app(settings=None,database=None):
     application.mount('/static',StaticFiles(directory=str(ROOT/'static')),name='static')
     application.include_router(auth.router)
     application.include_router(admin.router)
+    application.include_router(admin_submissions.router)
     application.include_router(chat.router)
     application.include_router(memories.router)
+    application.include_router(submissions.router)
     application.include_router(portal.api)
     application.include_router(portal.pages)
     application.add_middleware(TrustedHostMiddleware,allowed_hosts=list(settings.allowed_hosts))

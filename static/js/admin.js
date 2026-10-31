@@ -177,7 +177,132 @@ KP_PAGES.admin_document = async function adminDocumentPage() {
   document.title = doc.title + '（後台檢視） · KnowPilot';
   fill(article, { ...documentFields(doc), version: '版本 ' + doc.version });
   fillMarkdown(article, { content: doc.content });
+  article.querySelector('[data-archived]').hidden = doc.status !== 'archived';
+  const archive = article.querySelector('[data-archive]');
+  const status = article.querySelector('[data-archive-status]');
+  archive.hidden = doc.status !== 'published';
+  archive.addEventListener('click', async () => {
+    if (!window.confirm(`確定要下架「${doc.title}」嗎？下架後文件中心與 AI 助理都查不到這份文件（後台仍可檢視）。`)) return;
+    archive.disabled = true;
+    try {
+      await api(`/api/admin/documents/${doc.id}/archive`, { method: 'POST' });
+      archive.hidden = true;
+      article.querySelector('[data-archived]').hidden = false;
+      status.textContent = '已下架。';
+    } catch (error) {
+      status.textContent = error.message;
+      archive.disabled = false;
+    }
+  });
+  const { data: history } = await api(`/api/admin/documents/${doc.id}/revisions`);
+  document.getElementById('revision-list').replaceChildren(dataTable([
+    { label: '版本', value: (r) => r.version },
+    { label: '發布時間', value: (r) => taipeiDateTime(r.published_at) },
+    { label: '來源', value: (r) => r.kind ? `${SUBMISSION_KINDS[r.kind]}・${r.submitter || '—'}` : '原始版本' },
+    { label: '修改說明', value: (r) => r.change_note || '—' },
+  ], history, '這份文件還沒有經由審核發布的版本（目前為原始版本）。'));
   jumpToSection(article, new URLSearchParams(location.search).get('section'));
+};
+
+/* ---- document submissions review --------------------------------------------------------- */
+
+const SUBMISSION_KINDS = { create: '新增', revise: '修改' };
+const VISIBILITY_NAMES = { company: '全公司', department: '只限本部門' };
+const BUMP_NAMES = { minor: '小改', major: '大改' };
+
+KP_PAGES.admin_submissions = async function adminSubmissionsPage() {
+  const status = new URLSearchParams(location.search).get('status') || 'pending';
+  document.querySelectorAll('#status-tabs a').forEach((tab) => {
+    if (tab.dataset.status === status) tab.setAttribute('aria-current', 'page');
+  });
+  const { data } = await api('/api/admin/submissions?' + new URLSearchParams({ status }));
+  document.getElementById('submission-queue').replaceChildren(dataTable([
+    { label: '標題', value: (s) => link(`/admin/submissions/${s.id}`, s.title) },
+    { label: '類型', value: (s) => SUBMISSION_KINDS[s.kind] },
+    { label: '文件代碼', value: (s) => s.document_code },
+    { label: '提交者', value: (s) => `${s.submitter}（${s.department}）` },
+    { label: '送出時間', value: (s) => taipeiDateTime(s.submitted_at) },
+    { label: '提醒', value: (s) => (s.flags.length ? s.flags.map((f) => f.message).join('、') : '—') },
+  ], data, status === 'pending' ? '目前沒有待審的提交。' : '沒有這個狀態的提交。'));
+};
+
+function diffView(lines) {
+  const box = el('div', 'diff-lines');
+  for (const line of lines) {
+    const row = el('div', `diff-line is-${line.type}`);
+    row.append(el('span', 'diff-mark', { add: '+', del: '−', hunk: '', same: '' }[line.type]), el('span', 'diff-text', line.text || ' '));
+    box.append(row);
+  }
+  return box;
+}
+
+KP_PAGES.admin_submission = async function adminSubmissionPage() {
+  const heading = document.querySelector('[data-id]');
+  const main = document.getElementById('main-content');
+  const alert = main.querySelector(':scope > .alert');
+  const reviewStatus = main.querySelector('[data-review-status]');
+  const { data: sub } = await api('/api/admin/submissions/' + heading.dataset.id);
+  document.title = sub.title + '（審核） · KnowPilot';
+  fill(main, { title: sub.title, kind: SUBMISSION_KINDS[sub.kind], document_code: sub.document_code, submitter: sub.submitter,
+    department: sub.department, submitted: taipeiDateTime(sub.submitted_at), status_label: sub.status_label,
+    summary: sub.summary, category: sub.category, visibility: VISIBILITY_NAMES[sub.visibility],
+    change_note: sub.change_note, version_bump: sub.version_bump && `${BUMP_NAMES[sub.version_bump]}（目前 ${sub.live_version}）`,
+    review_note: sub.review_note });
+  fillMarkdown(main, { content: sub.content });
+  if (sub.flags.length) {
+    main.querySelector('[data-flags]').hidden = false;
+    document.getElementById('flag-list').replaceChildren(...sub.flags.map((flag) => {
+      const item = el('li');
+      item.append(el('strong', '', flag.message), el('span', 'muted', '：' + flag.detail));
+      return item;
+    }));
+  }
+  if (sub.diff) {
+    main.querySelector('[data-diff]').hidden = false;
+    document.getElementById('field-diff').replaceChildren(dataTable([
+      { label: '欄位', value: (f) => f.label },
+      { label: '線上版本', value: (f) => f.before },
+      { label: '提交內容', value: (f) => f.after },
+    ], sub.diff.fields, '標題、摘要、分類與可見範圍都沒有變更。'));
+    document.getElementById('content-diff').replaceChildren(sub.diff.lines.length ? diffView(sub.diff.lines) : el('p', 'muted', '內容沒有變更。'));
+  }
+  main.querySelector('[data-conflict]').hidden = !sub.conflict;
+  const actions = main.querySelector('[data-actions]');
+  actions.hidden = sub.status !== 'pending';
+  const approve = actions.querySelector('[data-approve]');
+  approve.disabled = Boolean(sub.conflict);
+  const done = (text) => {
+    reviewStatus.textContent = text;
+    actions.querySelectorAll('button, textarea').forEach((node) => { node.disabled = true; });
+    showPendingReviews();
+  };
+  approve.addEventListener('click', async () => {
+    if (!window.confirm('確定要發布嗎？發布後文件中心與 AI 助理會立即使用這份內容。')) return;
+    approve.disabled = true;
+    try {
+      const { data } = await api(`/api/admin/submissions/${sub.id}/approve`, { method: 'POST' });
+      fill(main, { document_code: data.document_code, status_label: '已發布' });
+      done(`已發布：${data.document_code}（版本 ${data.version}）。`);
+      const open = link(`/admin/documents/${data.document_id}`, '查看已發布的文件');
+      reviewStatus.append(' ', open);
+    } catch (error) {
+      alert.textContent = error.message;
+      alert.hidden = false;
+      approve.disabled = false;
+    }
+  });
+  document.getElementById('reject-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const note = document.getElementById('review-note').value.trim();
+    if (!note) { reviewStatus.textContent = '退回時必須填寫原因。'; return; }
+    try {
+      await api(`/api/admin/submissions/${sub.id}/reject`, { method: 'POST', body: { review_note: note } });
+      fill(main, { status_label: '已退回', review_note: note });
+      done('已退回，提交者可以在「我的提交」看到原因。');
+    } catch (error) {
+      reviewStatus.textContent = error.message;
+    }
+  });
 };
 
 /* ---- dashboard ------------------------------------------------------------------------- */

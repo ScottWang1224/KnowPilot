@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 
 DOCUMENT_SELECT = '''SELECT d.id,d.document_code,d.title,d.summary,d.content,d.category,
-                           d.department_id,d.visibility,d.version,d.updated_at,
+                           d.department_id,d.owner_department_id,d.visibility,d.version,d.status,d.updated_at,
                            dep.name AS department_name
                     FROM documents d LEFT JOIN departments dep ON dep.id=d.department_id'''
 
@@ -44,12 +44,13 @@ def document(db,user,doc_id):
     return db.query(DOCUMENT_SELECT+' WHERE '+scope+' AND d.id=%s',params+(doc_id,),one=True)
 
 
-def published_document(db,doc_id):
-    """Admin pages only (require_admin): any published document, regardless of department.
+def admin_document(db,doc_id):
+    """Admin pages only (require_admin): any published or archived document, regardless of department,
+    so citations in old conversations still open after a document is archived.
 
     Never used for listings, the RAG index or an admin's own chat, which all stay on document_scope().
     """
-    return db.query(DOCUMENT_SELECT+" WHERE d.status='published' AND d.id=%s",(doc_id,),one=True)
+    return db.query(DOCUMENT_SELECT+" WHERE d.status IN ('published','archived') AND d.id=%s",(doc_id,),one=True)
 
 
 def document_categories(db,user):
